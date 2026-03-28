@@ -44,9 +44,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const navLinks = [
     { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
-    { name: "Raio-X", href: "/dashboard/ingestion", icon: Activity },
-    { name: "Inteligência", href: "/dashboard/intelligence", icon: Search },
-    { name: "Fábrica", href: "/dashboard/studio", icon: Palette },
+    { name: "Raio-X", href: "/dashboard/raio-x", icon: Activity },
+    { name: "Estúdio de Pautas", href: "/dashboard/studio", icon: Search },
+    { name: "Fábrica de Carrosséis", href: "/dashboard/factory", icon: Palette },
   ];
 
   if (loading) {
@@ -126,7 +126,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       {/* Main Content Area */}
       <main className="flex-1 overflow-auto">
-        <div className=" max-w-screen-2xl mx-auto p-6 md:p-8">
+        <div className=" max-w-screen-2xl mx-auto py-6 md:py-8">
           {children}
         </div>
       </main>

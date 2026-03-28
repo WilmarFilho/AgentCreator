@@ -43,25 +43,36 @@ export default function DashboardOverview() {
         <div className="lg:col-span-2 bg-zinc-900/50 border border-zinc-800/50 p-6 rounded-2xl backdrop-blur-xl">
           <h2 className="text-xl font-bold mb-4">Ações Rápidas</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Link href="/dashboard/ingestion">
-              <div className="p-4 rounded-xl border border-zinc-800 hover:border-brand/50 bg-zinc-900 transition-colors group cursor-pointer">
+            <Link href="/dashboard/raio-x">
+              <div className="p-4 rounded-xl border border-zinc-800 hover:border-brand/50 bg-zinc-900 transition-colors group cursor-pointer h-full">
                 <div className="w-10 h-10 rounded-full bg-brand/10 flex items-center justify-center mb-3 group-hover:bg-brand/20 transition-colors">
                   <Activity className="w-5 h-5 text-brand" />
                 </div>
                 <h3 className="font-semibold text-slate-100 mb-1">Passo 1: Raio-X</h3>
                 <p className="text-sm text-slate-400">
-                  Descubra seu perfil psicológico analisando seu histórico.
+                  Descubra seu perfil analisando seu histórico.
                 </p>
               </div>
             </Link>
             <Link href="/dashboard/studio">
-              <div className="p-4 rounded-xl border border-zinc-800 hover:border-blue-500/50 bg-zinc-900 transition-colors group cursor-pointer">
+              <div className="p-4 rounded-xl border border-zinc-800 hover:border-blue-500/50 bg-zinc-900 transition-colors group cursor-pointer h-full">
                 <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center mb-3 group-hover:bg-blue-500/20 transition-colors">
-                  <Palette className="w-5 h-5 text-blue-400" />
+                  <Sparkles className="w-5 h-5 text-blue-400" />
                 </div>
-                <h3 className="font-semibold text-slate-100 mb-1">Gerar Carrossel</h3>
+                <h3 className="font-semibold text-slate-100 mb-1">Passo 2: Estúdio</h3>
                 <p className="text-sm text-slate-400">
-                  Vá direto para a fábrica de criação e exporte seu design.
+                  Descubra pautas virais e escreva suas copies baseadas na IA.
+                </p>
+              </div>
+            </Link>
+            <Link href="/dashboard/factory">
+              <div className="p-4 rounded-xl border border-zinc-800 hover:border-emerald-500/50 bg-zinc-900 transition-colors group cursor-pointer h-full sm:col-span-2 md:col-span-1">
+                <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center mb-3 group-hover:bg-emerald-500/20 transition-colors">
+                  <Palette className="w-5 h-5 text-emerald-400" />
+                </div>
+                <h3 className="font-semibold text-slate-100 mb-1">Passo 3: Fábrica</h3>
+                <p className="text-sm text-slate-400">
+                  Transforme suas copies em carrosséis visuais deslumbrantes.
                 </p>
               </div>
             </Link>
