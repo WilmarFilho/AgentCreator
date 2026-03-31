@@ -6,10 +6,18 @@ import * as path from 'path';
 import * as os from 'os';
 import { SupabaseClient } from '@supabase/supabase-js';
 
-// Set ffmpeg binary path from the bundled installer
+// Set ffmpeg/ffprobe binary paths from the bundled installers
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
 ffmpeg.setFfmpegPath(ffmpegPath);
+
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const ffprobePath = require('@ffprobe-installer/ffprobe').path;
+  ffmpeg.setFfprobePath(ffprobePath);
+} catch {
+  // ffprobe installer not available, will use system ffprobe if present
+}
 
 const BUCKET_NAME = 'raio-x-media';
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
@@ -20,6 +28,7 @@ export class MediaProcessorService {
 
   /**
    * Downloads a video from URL and extracts audio as MP3 buffer.
+   * Throws if the video has no audio stream (e.g., silent GIF-like loops).
    */
   async extractAudioFromVideo(videoUrl: string): Promise<Buffer> {
     this.logger.debug(`Downloading and extracting audio from video: ${videoUrl.substring(0, 80)}...`);
@@ -38,6 +47,13 @@ export class MediaProcessorService {
 
       fs.writeFileSync(videoPath, Buffer.from(response.data));
       this.logger.debug(`Video downloaded: ${(response.data.byteLength / 1024 / 1024).toFixed(2)} MB`);
+
+      // Check if video has an audio stream before trying to extract
+      const hasAudio = await this.hasAudioStream(videoPath);
+      if (!hasAudio) {
+        this.logger.warn('Video has no audio stream, skipping transcription');
+        throw new Error('Video has no audio stream — likely a silent GIF/loop');
+      }
 
       await new Promise<void>((resolve, reject) => {
         ffmpeg(videoPath)
@@ -69,6 +85,26 @@ export class MediaProcessorService {
       this.safeDelete(videoPath);
       this.safeDelete(audioPath);
     }
+  }
+
+  /**
+   * Probes a video file to check if it contains an audio stream.
+   */
+  private hasAudioStream(filePath: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      ffmpeg.ffprobe(filePath, (err, metadata) => {
+        if (err) {
+          this.logger.warn(`ffprobe failed, assuming audio exists: ${err.message}`);
+          resolve(true); // Assume audio exists if probe fails — let FFmpeg handle it
+          return;
+        }
+        const audioStream = metadata.streams?.find(s => s.codec_type === 'audio');
+        if (!audioStream) {
+          this.logger.debug('ffprobe: No audio stream found in video');
+        }
+        resolve(!!audioStream);
+      });
+    });
   }
 
   /**

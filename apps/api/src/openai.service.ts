@@ -141,21 +141,56 @@ Responda em Português Brasileiro de forma estruturada e concisa (máximo 300 pa
   async analyzePersonaDeep(content: DeepContentPayload): Promise<PersonaResult> {
     this.logger.log('Analyzing persona with DEEP analysis (captions + images + videos)...');
 
+    // ── Token budget management ──
+    // GPT-4o TPM limit is 30k. System prompt ~600 tokens, response 4k tokens.
+    // So we budget ~20k tokens for user content (~80k chars / 4 chars per token).
+    const MAX_CONTENT_CHARS = 20000;
+    const MAX_ITEM_CHARS = 800; // Max chars per individual item
+
+    // Sample and truncate each content type proportionally
+    const truncateItem = (text: string) =>
+      text.length > MAX_ITEM_CHARS ? text.substring(0, MAX_ITEM_CHARS) + '...' : text;
+
+    // Prioritize: captions (most important), then videos, then images
+    const maxCaptions = Math.min(content.captions.length, 15);
+    const maxVideos = Math.min(content.videoTranscriptions.length, 5);
+    const maxImages = Math.min(content.imageAnalyses.length, 20);
+
+    const sampledCaptions = content.captions.slice(0, maxCaptions).map(truncateItem);
+    const sampledVideos = content.videoTranscriptions.slice(0, maxVideos).map(truncateItem);
+    const sampledImages = content.imageAnalyses.slice(0, maxImages).map(truncateItem);
+
+    if (content.captions.length > maxCaptions || content.imageAnalyses.length > maxImages || content.videoTranscriptions.length > maxVideos) {
+      this.logger.warn(
+        `Content truncated for persona analysis: captions ${content.captions.length}→${sampledCaptions.length}, ` +
+        `images ${content.imageAnalyses.length}→${sampledImages.length}, ` +
+        `videos ${content.videoTranscriptions.length}→${sampledVideos.length}`
+      );
+    }
+
     const sections: string[] = [];
 
-    if (content.captions.length > 0) {
-      sections.push(`## LEGENDAS DOS POSTS (${content.captions.length} posts)\n${content.captions.join('\n---\n')}`);
+    if (sampledCaptions.length > 0) {
+      sections.push(`## LEGENDAS DOS POSTS (${sampledCaptions.length}/${content.captions.length} posts)\n${sampledCaptions.join('\n---\n')}`);
     }
 
-    if (content.imageAnalyses.length > 0) {
-      sections.push(`## ANÁLISES VISUAIS DAS IMAGENS (${content.imageAnalyses.length} imagens)\n${content.imageAnalyses.join('\n---\n')}`);
+    if (sampledImages.length > 0) {
+      sections.push(`## ANÁLISES VISUAIS DAS IMAGENS (${sampledImages.length}/${content.imageAnalyses.length} imagens)\n${sampledImages.join('\n---\n')}`);
     }
 
-    if (content.videoTranscriptions.length > 0) {
-      sections.push(`## TRANSCRIÇÕES DE VÍDEOS/REELS (${content.videoTranscriptions.length} vídeos)\n${content.videoTranscriptions.join('\n---\n')}`);
+    if (sampledVideos.length > 0) {
+      sections.push(`## TRANSCRIÇÕES DE VÍDEOS/REELS (${sampledVideos.length}/${content.videoTranscriptions.length} vídeos)\n${sampledVideos.join('\n---\n')}`);
     }
 
-    const fullContent = sections.join('\n\n');
+    let fullContent = sections.join('\n\n');
+
+    // Final safety net: hard truncate if still too long
+    if (fullContent.length > MAX_CONTENT_CHARS) {
+      this.logger.warn(`Content still too long (${fullContent.length} chars), hard truncating to ${MAX_CONTENT_CHARS}`);
+      fullContent = fullContent.substring(0, MAX_CONTENT_CHARS) + '\n\n[...conteúdo truncado por limite de tokens]';
+    }
+
+    this.logger.debug(`Persona analysis content size: ${fullContent.length} chars (~${Math.ceil(fullContent.length / 4)} tokens)`);
 
     try {
       const response = await this.openai.chat.completions.create({
@@ -165,7 +200,7 @@ Responda em Português Brasileiro de forma estruturada e concisa (máximo 300 pa
             role: 'system',
             content: `Você é um estrategista de marketing digital de elite, especialista em branding pessoal e análise comportamental de criadores de conteúdo.
 
-Você receberá uma análise completa do conteúdo de um perfil do Instagram, incluindo:
+Você receberá uma amostra representativa do conteúdo de um perfil do Instagram, incluindo:
 - Legendas dos posts
 - Análises visuais das imagens (feitas por IA)
 - Transcrições de vídeos/reels
@@ -193,7 +228,7 @@ Responda APENAS com um JSON válido seguindo esta estrutura:
           },
           {
             role: 'user',
-            content: `Analise o seguinte conteúdo completo do perfil:\n\n${fullContent}`,
+            content: `Analise o seguinte conteúdo do perfil:\n\n${fullContent}`,
           },
         ],
         response_format: { type: 'json_object' },
