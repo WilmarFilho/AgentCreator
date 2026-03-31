@@ -27,7 +27,7 @@ export class InstagramService {
    * Fetches user posts with pagination support.
    * Instagram Graph API returns max 25 per page, so we paginate to get up to `limit`.
    */
-  async fetchUserPosts(igUserId: string, accessToken: string, limit: number = 30): Promise<InstagramPost[]> {
+  async fetchUserPosts(igUserId: string, accessToken: string, limit: number = 15): Promise<InstagramPost[]> {
     this.logger.debug(`Fetching up to ${limit} posts from Instagram for IG User: ${igUserId}...`);
     const allPosts: InstagramPost[] = [];
     let url: string | null = `${this.baseUrl}/${igUserId}/media`;
@@ -174,7 +174,7 @@ export class InstagramService {
           if (igRes.data.instagram_business_account) {
             igUserId = igRes.data.instagram_business_account.id;
             this.logger.debug(`Found Instagram Business Account ID: ${igUserId} on Page: ${page.name}`);
-            
+
             const profileRes = await axios.get(`${this.baseUrl}/${igUserId}`, {
               params: {
                 fields: 'username',

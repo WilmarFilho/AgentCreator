@@ -117,9 +117,9 @@ export class RaioXService {
     this.logger.log('🧹 Cleaning up previous analysis data...');
     await this.cleanupPreviousAnalysis(profileId);
 
-    // ─── STEP 1: Fetch 20 posts (with pagination) ─────────────────────
-    this.logger.log('📥 Fetching up to 20 Instagram posts...');
-    const posts = await this.instagram.fetchUserPosts(igUserId, token, 20);
+    // ─── STEP 1: Fetch 15 posts (with pagination) ─────────────────────
+    this.logger.log('📥 Fetching up to 15 Instagram posts...');
+    const posts = await this.instagram.fetchUserPosts(igUserId, token, 15);
     this.logger.log(`Fetched ${posts.length} posts total.`);
 
     if (posts.length === 0) {
@@ -130,7 +130,7 @@ export class RaioXService {
     this.logger.log('💾 Saving posts and uploading media to storage...');
     const postDbRecords: { postId: string; dbId: string }[] = [];
 
-    for (const post of posts) {
+    await this.runWithConcurrency(posts, 5, async (post) => {
       if (post.media_type === 'CAROUSEL_ALBUM') {
         post.children = await this.instagram.fetchCarouselChildren(post.id, token);
       }
@@ -186,14 +186,15 @@ export class RaioXService {
 
       if (error) {
         this.logger.warn(`Could not insert metric for post ${post.id}: ${error.message}`);
-        continue;
+        return;
       }
 
       postDbRecords.push({ postId: post.id, dbId: data.id });
-    }
+    });
 
-    // ─── STEP 3: Process each post for deep content extraction ────────
-    this.logger.log('🔍 Starting deep content extraction for all posts...');
+    // ─── STEP 3: Process each post for deep content extraction (PARALLEL) ─
+    const extractionStart = Date.now();
+    this.logger.log('🔍 Starting PARALLEL content extraction (concurrency=5)...');
     const deepContent: DeepContentPayload = {
       captions: [],
       imageAnalyses: [],
@@ -207,10 +208,9 @@ export class RaioXService {
       metadata: Record<string, any>;
     }[] = [];
 
-    for (let i = 0; i < posts.length; i++) {
-      const post = posts[i];
+    await this.runWithConcurrency(posts, 5, async (post, i) => {
       const dbRecord = postDbRecords.find(r => r.postId === post.id);
-      if (!dbRecord) continue;
+      if (!dbRecord) return;
 
       const postLabel = `[${i + 1}/${posts.length}] Post ${post.id} (${post.media_type})`;
       this.logger.log(`Processing ${postLabel}...`);
@@ -262,8 +262,8 @@ export class RaioXService {
 
       // 3c. CAROUSEL — Upload each slide + analyze
       if (post.media_type === 'CAROUSEL_ALBUM' && post.children) {
-        for (let slideIdx = 0; slideIdx < post.children.length; slideIdx++) {
-          const child = post.children[slideIdx];
+        const children = post.children;
+        await this.runWithConcurrency(children, 3, async (child, slideIdx) => {
 
           // Upload each carousel slide to storage
           let slideStoragePath: string | null = null;
@@ -282,7 +282,7 @@ export class RaioXService {
 
           if (child.media_type === 'IMAGE' && child.media_url) {
             try {
-              this.logger.debug(`🖼️  Analyzing carousel slide ${slideIdx + 1}/${post.children.length}...`);
+              this.logger.debug(`🖼️  Analyzing carousel slide ${slideIdx + 1}/${children.length}...`);
               const analysis = await this.openai.analyzeImage(child.media_url);
               deepContent.imageAnalyses.push(analysis);
 
@@ -334,7 +334,7 @@ export class RaioXService {
               this.logger.warn(`Failed to transcribe carousel video slide ${slideIdx}: ${err.message}`);
             }
           }
-        }
+        });
       }
 
       // 3d. VIDEO/REELS — Download, extract audio, transcribe
@@ -363,9 +363,10 @@ export class RaioXService {
           this.logger.warn(`Failed to process video for ${postLabel}: ${err.message}`);
         }
       }
-    }
+    });
 
-    this.logger.log(`✅ Content extraction complete!`);
+    const extractionSec = ((Date.now() - extractionStart) / 1000).toFixed(1);
+    this.logger.log(`✅ Content extraction complete in ${extractionSec}s!`);
     this.logger.log(`   📝 Captions: ${deepContent.captions.length}`);
     this.logger.log(`   🖼️  Image analyses: ${deepContent.imageAnalyses.length}`);
     this.logger.log(`   🎬 Video transcriptions: ${deepContent.videoTranscriptions.length}`);
@@ -514,5 +515,30 @@ export class RaioXService {
     }
 
     this.logger.log(`📚 Total RAG documents saved: ${documents.length}`);
+  }
+
+  /**
+   * Executes async tasks with a concurrency limit.
+   * Like Promise.all but limits how many run simultaneously.
+   */
+  private async runWithConcurrency<T>(
+    items: T[],
+    concurrency: number,
+    fn: (item: T, index: number) => Promise<void>,
+  ): Promise<void> {
+    const executing: Promise<void>[] = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const p = fn(items[i], i).then(() => {
+        executing.splice(executing.indexOf(p), 1);
+      });
+      executing.push(p);
+
+      if (executing.length >= concurrency) {
+        await Promise.race(executing);
+      }
+    }
+
+    await Promise.all(executing);
   }
 }
