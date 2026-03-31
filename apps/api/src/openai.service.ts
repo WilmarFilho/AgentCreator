@@ -29,13 +29,14 @@ export class OpenaiService {
           {
             role: 'system',
             content: `You are an expert AI marketing strategist. Based on the user's latest Instagram posts, you must determine their Brand Persona. 
+IMPORTANT: ALL values in the JSON output must be written in Brazilian Portuguese (pt-BR), except for the JSON keys which must remain exactly as specified in English.
 Respond ONLY with a valid JSON format following this exact structure:
 {
   "primary_goal": "sales" | "authority" | "growth",
-  "content_niche": "string describing their niche",
-  "tone_of_voice": "string describing tone",
-  "psychological_profile": "string describing the psychology of the brand",
-  "visual_preferences": { "colors": "string", "style": "string" }
+  "content_niche": "string describing their niche (in pt-BR)",
+  "tone_of_voice": "string describing tone (in pt-BR)",
+  "psychological_profile": "string describing the psychology of the brand (in pt-BR)",
+  "visual_preferences": { "colors": "string (in pt-BR)", "style": "string (in pt-BR)" }
 }`,
           },
           {
@@ -68,12 +69,13 @@ Respond ONLY with a valid JSON format following this exact structure:
           {
             role: 'system',
             content: `You are an AI trend analyzer. Based on the following user persona, suggest 3 highly viral and relevant content ideas (news, trends, or controversial hooks) they should post about right now as an Instagram Carousel.
+IMPORTANT: ALL text content inside the JSON values must be translated to and written in Brazilian Portuguese (pt-BR).
 Respond ONLY with a valid JSON format following this exact structure:
 {
   "trends": [
     {
-      "title": "Short Hook/Headline",
-      "summary": "1-2 sentence explanation of why this is relevant now or what the angle is"
+      "title": "Short Hook/Headline (in pt-BR)",
+      "summary": "1-2 sentence explanation of why this is relevant now or what the angle is (in pt-BR)"
     }
   ]
 }`,
@@ -107,14 +109,15 @@ Respond ONLY with a valid JSON format following this exact structure:
             role: 'system',
             content: `You are a world-class Instagram copywriter. Create a 5-10 slide carousel script about the provided topic.
 The template context defines the visual style, make sure the text fits that style.
+IMPORTANT: The 'main_caption' and 'copy_text' MUST be written in Brazilian Portuguese (pt-BR). The 'ai_image_prompt' should remain in English to be used with Midjourney.
 Respond ONLY with a valid JSON format following this exact structure:
 {
-  "main_caption": "The Instagram caption to go along with the post, including hashtags",
+  "main_caption": "The Instagram caption to go along with the post, including hashtags (in pt-BR)",
   "slides": [
     {
       "order": 1,
-      "copy_text": "The exact text to appear on the slide",
-      "ai_image_prompt": "A prompt to generate an evocative background image for this slide based on the text (midjourney style)"
+      "copy_text": "The exact text to appear on the slide (in pt-BR)",
+      "ai_image_prompt": "A prompt to generate an evocative background image for this slide based on the text (midjourney style, in English)"
     }
   ]
 }`,

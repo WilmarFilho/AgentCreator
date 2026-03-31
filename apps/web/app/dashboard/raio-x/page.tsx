@@ -15,6 +15,22 @@ function RaioXContent() {
   const [userId, setUserId] = useState<string | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
   const [availableAccounts, setAvailableAccounts] = useState<AccountInfo[]>([]);
+  const [analyzedPosts, setAnalyzedPosts] = useState<any[]>([]);
+
+  const fetchPosts = async (uid: string) => {
+    try {
+      const { data, error } = await supabase.from('post_metrics')
+        .select('*')
+        .eq('profile_id', uid)
+        .order('posted_at', { ascending: false })
+        .limit(10);
+      if (data && !error) {
+        setAnalyzedPosts(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -37,6 +53,7 @@ function RaioXContent() {
             console.log("Persona encontrada:", data.id);
             setPersona(data);
             setStatus('DONE');
+            fetchPosts(uid);
           } else {
             console.log("Nenhuma persona encontrada ou erro:", error?.message);
             if (searchParams?.get('step') === 'select_account' && searchParams?.get('token')) {
@@ -92,9 +109,6 @@ function RaioXContent() {
       console.log("Auth state change event:", event, session?.user?.id);
       if (mounted && session?.user) {
         setUserId(session.user.id);
-        if (status === 'IDLE' && !persona) {
-          checkExistingPersona(session.user.id);
-        }
       }
     });
 
@@ -102,7 +116,7 @@ function RaioXContent() {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [searchParams, router, status, persona]);
+  }, [searchParams, router]);
 
   useEffect(() => {
     if (status === 'ANALYSING' && userId) {
@@ -121,6 +135,7 @@ function RaioXContent() {
             console.log("Nova persona detectada via Realtime!", payload.new);
             setPersona(payload.new);
             setStatus('DONE');
+            fetchPosts(userId);
           }
         )
         .subscribe((status) => {
@@ -233,7 +248,26 @@ function RaioXContent() {
         )}
 
         {status === 'DONE' && persona && (
-          <PersonaResult persona={persona} />
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-1000">
+            <PersonaResult persona={persona} />
+            
+            {analyzedPosts.length > 0 && (
+              <div className="bg-zinc-900/60 border border-white/5 rounded-3xl p-8 backdrop-blur-2xl">
+                <h3 className="text-2xl font-bold text-white mb-6">Posts Analisados Recentemente</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+                  {analyzedPosts.map(post => (
+                    <div key={post.id} className="bg-zinc-800/50 p-4 rounded-xl border border-white/5 flex flex-col gap-2 hover:bg-zinc-700/50 transition-colors">
+                      <div className="flex justify-between items-center text-xs text-slate-400">
+                        <span>{new Date(post.posted_at).toLocaleDateString()}</span>
+                        <span className="bg-zinc-700/50 px-2 py-1 rounded capitalize">{post.media_type?.toLowerCase() || 'post'}</span>
+                      </div>
+                      <p className="text-sm text-slate-300 line-clamp-6 mt-2">{post.caption || 'Sem legenda associada ao post.'}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
