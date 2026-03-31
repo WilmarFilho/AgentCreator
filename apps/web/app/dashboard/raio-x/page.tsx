@@ -44,7 +44,7 @@ function RaioXContent() {
               setStatus('SELECT_ACCOUNT');
               fetchAccounts(searchParams.get('token') as string);
             } else if (searchParams?.get('success') === 'true') {
-              console.log("Detectado ?success=true na URL, entrando em modo ANALYSING");
+              console.log("Detectado ??success=true na URL, entrando em modo ANALYSING");
               setStatus('ANALYSING');
               router.replace('/dashboard/raio-x', { scroll: false });
             }
@@ -140,7 +140,7 @@ function RaioXContent() {
       alert("Aguardando carregamento da sessão... Verifique se você está logado.");
       return;
     }
-    
+
     setStatus('ANALYSING'); // Temporary state while redirecting
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
     const finalUrl = `${apiUrl}/api/raio-x/oauth/facebook?profileId=${userId}`;
@@ -153,7 +153,7 @@ function RaioXContent() {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
       const token = searchParams?.get('token');
-      
+
       const res = await fetch(`${apiUrl}/api/raio-x/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -164,9 +164,9 @@ function RaioXContent() {
           accessToken: token
         })
       });
-      
+
       if (!res.ok) throw new Error('Falha ao iniciar análise');
-      
+
       router.replace('/dashboard/raio-x', { scroll: false });
     } catch (e) {
       console.error(e);
@@ -208,7 +208,7 @@ function RaioXContent() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl">
                 {availableAccounts.map(acc => (
-                  <button 
+                  <button
                     key={acc.igUserId}
                     onClick={() => handleAccountSelect(acc)}
                     className="p-6 bg-zinc-800/50 hover:bg-zinc-700/80 border border-white/10 rounded-2xl flex flex-col items-start transition-all duration-200"
