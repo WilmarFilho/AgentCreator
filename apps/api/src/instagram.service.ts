@@ -57,7 +57,9 @@ export class InstagramService {
     
     // Passing profileId in the state so we know who authorized
     const state = Buffer.from(JSON.stringify({ profileId })).toString('base64');
-    const scope = 'instagram_basic,pages_show_list'; // For Graph API usually
+    
+    // Scopes obrigatórios para a Graph API (Instagram Business/Creator)
+    const scope = 'pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights';
     
     return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}&state=${state}`;
   }
