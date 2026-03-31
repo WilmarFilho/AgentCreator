@@ -13,7 +13,7 @@ export class InstagramService {
   private readonly logger = new Logger(InstagramService.name);
   private readonly baseUrl = 'https://graph.facebook.com/v19.0';
 
-  constructor() {}
+  constructor() { }
 
   async fetchUserPosts(igUserId: string, accessToken: string, limit: number = 20): Promise<InstagramPost[]> {
     this.logger.debug(`Fetching latest ${limit} posts from Instagram for IG User: ${igUserId}...`);
@@ -54,13 +54,13 @@ export class InstagramService {
       this.logger.error('Meta OAuth env variables missing');
       throw new Error('OAuth não configurado corretamente no backend.');
     }
-    
+
     // Passing profileId in the state so we know who authorized
     const state = Buffer.from(JSON.stringify({ profileId })).toString('base64');
-    
+
     // Scopes obrigatórios para a Graph API (Instagram Business/Creator)
     const scope = 'pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights';
-    
+
     return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}&state=${state}`;
   }
 
@@ -90,10 +90,17 @@ export class InstagramService {
   async getIgProfileInfo(accessToken: string): Promise<{ igUserId: string; username: string }> {
     this.logger.debug('Fetching Facebook Pages to find Instagram Business Account...');
     try {
-      // 1. Get User's Pages
+      // No passo 1 da função getIgProfileInfo
       const pagesRes = await axios.get(`${this.baseUrl}/me/accounts`, {
-        params: { access_token: accessToken },
+        params: {
+          access_token: accessToken,
+          fields: 'id,name,access_token,instagram_business_account' // Peça o campo explicitamente
+        },
       });
+
+      // LOG DE DEPURAÇÃO:
+      this.logger.debug(`Resposta bruta da Meta: ${JSON.stringify(pagesRes.data)}`);
+
       const pages = pagesRes.data.data;
       if (!pages || pages.length === 0) {
         throw new Error('Nenhuma página do Facebook encontrada para este usuário.');
@@ -103,11 +110,11 @@ export class InstagramService {
       // 2. Find Instagram Business Account linked to one of these pages
       let igUserId: string | null = null;
       let pageAccessToken: string | null = null;
-      
+
       for (const page of pages) {
         const pageId = page.id;
         const pageToken = page.access_token;
-        
+
         try {
           const igRes = await axios.get(`${this.baseUrl}/${pageId}`, {
             params: {
@@ -115,7 +122,7 @@ export class InstagramService {
               access_token: pageToken,
             },
           });
-          
+
           if (igRes.data.instagram_business_account) {
             igUserId = igRes.data.instagram_business_account.id;
             pageAccessToken = pageToken;
