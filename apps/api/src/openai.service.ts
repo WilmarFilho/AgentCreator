@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import OpenAI from 'openai';
+import { toFile } from 'openai';
 
 export interface PersonaResult {
   primary_goal: 'sales' | 'authority' | 'growth';
@@ -7,6 +8,12 @@ export interface PersonaResult {
   tone_of_voice: string;
   psychological_profile: string;
   visual_preferences: Record<string, string>;
+}
+
+export interface DeepContentPayload {
+  captions: string[];
+  imageAnalyses: string[];
+  videoTranscriptions: string[];
 }
 
 @Injectable()
@@ -20,8 +27,175 @@ export class OpenaiService {
     });
   }
 
+  // ─── VISION: Analyze an Instagram post image ─────────────────────────
+  async analyzeImage(imageUrl: string): Promise<string> {
+    this.logger.debug(`Analyzing image with GPT-4o Vision: ${imageUrl.substring(0, 80)}...`);
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: `Você é um analista especialista de conteúdo para Instagram. Analise a imagem do post e descreva em detalhes:
+1. O que aparece na imagem (pessoas, objetos, cenário, texto overlay)
+2. O estilo visual (cores dominantes, filtros, composição, iluminação)
+3. O tipo de conteúdo (educativo, lifestyle, produto, bastidores, motivacional, etc.)
+4. A mensagem/intenção por trás da imagem
+5. Qualidade percebida (amador, semi-profissional, profissional)
+
+Responda em Português Brasileiro de forma estruturada e concisa (máximo 300 palavras).`,
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: imageUrl, detail: 'low' },
+              },
+            ],
+          },
+        ],
+        max_tokens: 500,
+      });
+
+      return response.choices[0]?.message?.content || 'Análise não disponível';
+    } catch (error: any) {
+      this.logger.error(`Failed to analyze image: ${error.message}`);
+      return `Erro ao analisar imagem: ${error.message}`;
+    }
+  }
+
+  // ─── WHISPER: Transcribe audio from video ─────────────────────────────
+  async transcribeAudio(audioBuffer: Buffer, filename: string = 'audio.mp3'): Promise<string> {
+    this.logger.debug(`Transcribing audio (${(audioBuffer.length / 1024 / 1024).toFixed(2)} MB)...`);
+    try {
+      const file = await toFile(audioBuffer, filename, { type: 'audio/mpeg' });
+
+      const transcription = await this.openai.audio.transcriptions.create({
+        file,
+        model: 'whisper-1',
+        language: 'pt',
+        response_format: 'text',
+      });
+
+      this.logger.debug(`Transcription complete: ${(transcription as string).substring(0, 100)}...`);
+      return transcription as string;
+    } catch (error: any) {
+      this.logger.error(`Failed to transcribe audio: ${error.message}`);
+      return `Erro na transcrição: ${error.message}`;
+    }
+  }
+
+  // ─── EMBEDDINGS: Generate vector embedding for RAG ────────────────────
+  async generateEmbedding(text: string): Promise<number[]> {
+    try {
+      // Truncate to ~8000 tokens (~32k chars) to stay within model limits
+      const truncated = text.substring(0, 30000);
+
+      const response = await this.openai.embeddings.create({
+        model: 'text-embedding-3-small',
+        input: truncated,
+      });
+
+      return response.data[0].embedding;
+    } catch (error: any) {
+      this.logger.error(`Failed to generate embedding: ${error.message}`);
+      throw error;
+    }
+  }
+
+  // ─── BATCH EMBEDDINGS: Generate multiple embeddings at once ────────────
+  async generateEmbeddingsBatch(texts: string[]): Promise<number[][]> {
+    if (texts.length === 0) return [];
+    try {
+      const truncated = texts.map(t => t.substring(0, 30000));
+
+      const response = await this.openai.embeddings.create({
+        model: 'text-embedding-3-small',
+        input: truncated,
+      });
+
+      return response.data.map(d => d.embedding);
+    } catch (error: any) {
+      this.logger.error(`Failed to generate batch embeddings: ${error.message}`);
+      throw error;
+    }
+  }
+
+  // ─── DEEP PERSONA: Analyze using ALL content types ────────────────────
+  async analyzePersonaDeep(content: DeepContentPayload): Promise<PersonaResult> {
+    this.logger.log('Analyzing persona with DEEP analysis (captions + images + videos)...');
+
+    const sections: string[] = [];
+
+    if (content.captions.length > 0) {
+      sections.push(`## LEGENDAS DOS POSTS (${content.captions.length} posts)\n${content.captions.join('\n---\n')}`);
+    }
+
+    if (content.imageAnalyses.length > 0) {
+      sections.push(`## ANÁLISES VISUAIS DAS IMAGENS (${content.imageAnalyses.length} imagens)\n${content.imageAnalyses.join('\n---\n')}`);
+    }
+
+    if (content.videoTranscriptions.length > 0) {
+      sections.push(`## TRANSCRIÇÕES DE VÍDEOS/REELS (${content.videoTranscriptions.length} vídeos)\n${content.videoTranscriptions.join('\n---\n')}`);
+    }
+
+    const fullContent = sections.join('\n\n');
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: `Você é um estrategista de marketing digital de elite, especialista em branding pessoal e análise comportamental de criadores de conteúdo.
+
+Você receberá uma análise completa do conteúdo de um perfil do Instagram, incluindo:
+- Legendas dos posts
+- Análises visuais das imagens (feitas por IA)
+- Transcrições de vídeos/reels
+
+Com base em TUDO isso, defina a Brand Persona desse criador de conteúdo.
+
+IMPORTANTE: Todos os valores no JSON devem ser escritos em Português Brasileiro (pt-BR), exceto as chaves JSON que devem permanecer em inglês.
+
+Sua análise deve ser PROFUNDA e DETALHADA. Não seja genérico. Use exemplos específicos do conteúdo analisado para justificar cada aspecto da persona.
+
+Responda APENAS com um JSON válido seguindo esta estrutura:
+{
+  "primary_goal": "sales" | "authority" | "growth",
+  "content_niche": "descrição detalhada do nicho e sub-nichos (pt-BR, mínimo 100 palavras)",
+  "tone_of_voice": "descrição rica do tom de voz com exemplos de padrões linguísticos encontrados (pt-BR, mínimo 100 palavras)",
+  "psychological_profile": "perfil psicológico profundo da marca/criador, incluindo arquétipos, valores centrais, gatilhos emocionais usados, e padrão de comunicação (pt-BR, mínimo 150 palavras)",
+  "visual_preferences": {
+    "colors": "paleta de cores dominante identificada nos posts (pt-BR)",
+    "style": "estilo visual predominante com detalhes (pt-BR)",
+    "photo_quality": "nível de qualidade e consistência visual (pt-BR)",
+    "content_formats": "formatos mais usados e preferidos (pt-BR)",
+    "visual_identity_score": "nota de 1 a 10 para consistência da identidade visual"
+  }
+}`,
+          },
+          {
+            role: 'user',
+            content: `Analise o seguinte conteúdo completo do perfil:\n\n${fullContent}`,
+          },
+        ],
+        response_format: { type: 'json_object' },
+        max_tokens: 4000,
+      });
+
+      const parsed: PersonaResult = JSON.parse(response.choices[0]?.message?.content || '{}');
+      return parsed;
+    } catch (error) {
+      this.logger.error('Error in deep persona analysis', error);
+      throw error;
+    }
+  }
+
+  // ─── LEGACY: Simple persona analysis (kept for backwards compat) ──────
   async analyzePersona(posts: string[]): Promise<PersonaResult> {
-    this.logger.log('Analyzing persona based on posts...');
+    this.logger.log('Analyzing persona based on posts (legacy mode)...');
     try {
       const response = await this.openai.chat.completions.create({
         model: 'gpt-4o-mini',

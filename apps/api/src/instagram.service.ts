@@ -1,11 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 
+export interface CarouselChild {
+  id: string;
+  media_type: 'IMAGE' | 'VIDEO';
+  media_url: string;
+}
+
 export interface InstagramPost {
   id: string;
   media_type: 'IMAGE' | 'VIDEO' | 'CAROUSEL_ALBUM';
   caption: string;
   timestamp: string;
+  media_url?: string;
+  children?: CarouselChild[];
 }
 
 @Injectable()
@@ -15,35 +23,84 @@ export class InstagramService {
 
   constructor() { }
 
-  async fetchUserPosts(igUserId: string, accessToken: string, limit: number = 20): Promise<InstagramPost[]> {
-    this.logger.debug(`Fetching latest ${limit} posts from Instagram for IG User: ${igUserId}...`);
+  /**
+   * Fetches user posts with pagination support.
+   * Instagram Graph API returns max 25 per page, so we paginate to get up to `limit`.
+   */
+  async fetchUserPosts(igUserId: string, accessToken: string, limit: number = 30): Promise<InstagramPost[]> {
+    this.logger.debug(`Fetching up to ${limit} posts from Instagram for IG User: ${igUserId}...`);
+    const allPosts: InstagramPost[] = [];
+    let url: string | null = `${this.baseUrl}/${igUserId}/media`;
+    const perPage = Math.min(limit, 25); // API max per request
+
     try {
-      // Instagram Graph API endpoint base for getting user media
-      const response = await axios.get(`${this.baseUrl}/${igUserId}/media`, {
+      while (url && allPosts.length < limit) {
+        const response: any = await axios.get(url, {
+          params: {
+            fields: 'id,caption,media_type,media_url,timestamp',
+            access_token: accessToken,
+            limit: perPage,
+          },
+        });
+
+        if (!response.data || !response.data.data) {
+          throw new Error('Invalid response from Instagram API');
+        }
+
+        const posts: InstagramPost[] = response.data.data.map((post: any) => ({
+          id: post.id,
+          media_type: post.media_type,
+          caption: post.caption || '',
+          timestamp: post.timestamp,
+          media_url: post.media_url || undefined,
+        }));
+
+        allPosts.push(...posts);
+
+        // Check for next page cursor
+        url = response.data.paging?.next || null;
+        this.logger.debug(`Fetched ${allPosts.length} posts so far... (has next page: ${!!url})`);
+      }
+
+      // Trim to exact limit
+      const result = allPosts.slice(0, limit);
+      this.logger.debug(`Fetched ${result.length} posts total.`);
+      return result;
+    } catch (error: any) {
+      this.logger.error('Failed to fetch Instagram posts', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Fetches individual slides (children) of a Carousel Album post.
+   */
+  async fetchCarouselChildren(mediaId: string, accessToken: string): Promise<CarouselChild[]> {
+    this.logger.debug(`Fetching carousel children for media ${mediaId}...`);
+    try {
+      const response = await axios.get(`${this.baseUrl}/${mediaId}/children`, {
         params: {
-          fields: 'id,caption,media_type,media_url,timestamp',
+          fields: 'id,media_type,media_url',
           access_token: accessToken,
-          limit,
         },
       });
 
       if (!response.data || !response.data.data) {
-        throw new Error('Invalid response from Instagram API');
+        this.logger.warn(`No children data for carousel ${mediaId}`);
+        return [];
       }
 
-      // Map to return just the relevant data
-      const posts: InstagramPost[] = response.data.data.map((post: any) => ({
-        id: post.id,
-        media_type: post.media_type,
-        caption: post.caption || '',
-        timestamp: post.timestamp,
+      const children: CarouselChild[] = response.data.data.map((child: any) => ({
+        id: child.id,
+        media_type: child.media_type,
+        media_url: child.media_url,
       }));
 
-      this.logger.debug(`Fetched ${posts.length} posts successfully.`);
-      return posts;
+      this.logger.debug(`Fetched ${children.length} slides for carousel ${mediaId}`);
+      return children;
     } catch (error: any) {
-      this.logger.error('Failed to fetch Instagram posts', error.response?.data || error.message);
-      throw error;
+      this.logger.error(`Failed to fetch carousel children for ${mediaId}`, error.response?.data || error.message);
+      return [];
     }
   }
 
@@ -55,10 +112,7 @@ export class InstagramService {
       throw new Error('OAuth não configurado corretamente no backend.');
     }
 
-    // Passing profileId in the state so we know who authorized
     const state = Buffer.from(JSON.stringify({ profileId })).toString('base64');
-
-    // Scopes obrigatórios para a Graph API (Instagram Business/Creator)
     const scope = 'business_management,pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights';
 
     return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}&state=${state}`;
@@ -79,7 +133,6 @@ export class InstagramService {
         },
       });
 
-      // Usually returns { access_token, token_type, expires_in }
       return response.data.access_token;
     } catch (error: any) {
       this.logger.error('Erro ao trocar auth code por access token', error.response?.data || error.message);
@@ -122,7 +175,6 @@ export class InstagramService {
             igUserId = igRes.data.instagram_business_account.id;
             this.logger.debug(`Found Instagram Business Account ID: ${igUserId} on Page: ${page.name}`);
             
-            // Get Instagram Profile username
             const profileRes = await axios.get(`${this.baseUrl}/${igUserId}`, {
               params: {
                 fields: 'username',
