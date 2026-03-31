@@ -1,4 +1,5 @@
-import { Body, Controller, Post, Get, Query, Redirect, HttpCode } from '@nestjs/common';
+import { Body, Controller, Post, Get, Query, Redirect, HttpCode, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { RaioXService } from './raio-x.service';
 
 export class StartAnalysisDto {
@@ -32,8 +33,11 @@ export class RaioXController {
   }
 
   @Get('oauth/callback')
-  @Redirect('http://localhost:3000/dashboard/raio-x?success=true')
-  async facebookCallback(@Query('code') code: string, @Query('state') state: string) {
+  async facebookCallback(
+    @Query('code') code: string, 
+    @Query('state') state: string,
+    @Res() res: any
+  ) {
     if (!code || !state) {
       throw new Error('Invalid OAuth parameters');
     }
@@ -43,10 +47,16 @@ export class RaioXController {
       if (!decoded.profileId) throw new Error('No profileId in state');
       
       await this.raioXService.handleOauthCallback(code, decoded.profileId);
+      
+      // Lógica de Redirecionamento de Sucesso
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      return res.redirect(`${frontendUrl}/dashboard/raio-x?success=true`);
+
     } catch (e: any) {
       console.error(e);
-      // Fail loudly or silently redirect to error. For now, redirect to dashboard error state
-      return { url: 'http://localhost:3000/dashboard/raio-x?error=oauth_failed' };
+      // Redirecionamento de Erro
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      return res.redirect(`${frontendUrl}/dashboard/raio-x?error=oauth_failed`);
     }
   }
 }
