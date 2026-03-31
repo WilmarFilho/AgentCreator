@@ -87,19 +87,15 @@ export class InstagramService {
     }
   }
 
-  async getIgProfileInfo(accessToken: string): Promise<{ igUserId: string; username: string }> {
-    this.logger.debug('Fetching Facebook Pages to find Instagram Business Account...');
+  async getAvailableIgAccounts(accessToken: string): Promise<{ igUserId: string; username: string; pageName: string }[]> {
+    this.logger.debug('Fetching Facebook Pages to find all Instagram Business Accounts...');
     try {
-      // No passo 1 da função getIgProfileInfo
       const pagesRes = await axios.get(`${this.baseUrl}/me/accounts`, {
         params: {
           access_token: accessToken,
-          fields: 'id,name,access_token,instagram_business_account' // Peça o campo explicitamente
+          fields: 'id,name,access_token,instagram_business_account'
         },
       });
-
-      // LOG DE DEPURAÇÃO:
-      this.logger.debug(`Resposta bruta da Meta: ${JSON.stringify(pagesRes.data)}`);
 
       const pages = pagesRes.data.data;
       if (!pages || pages.length === 0) {
@@ -107,13 +103,12 @@ export class InstagramService {
       }
       this.logger.debug(`Found ${pages.length} pages: ${pages.map((p: any) => p.name).join(', ')}`);
 
-      // 2. Find Instagram Business Account linked to one of these pages
-      let igUserId: string | null = null;
-      let pageAccessToken: string | null = null;
+      const availableAccounts: { igUserId: string; username: string; pageName: string }[] = [];
 
       for (const page of pages) {
         const pageId = page.id;
         const pageToken = page.access_token;
+        let igUserId: string | null = null;
 
         try {
           const igRes = await axios.get(`${this.baseUrl}/${pageId}`, {
@@ -125,37 +120,34 @@ export class InstagramService {
 
           if (igRes.data.instagram_business_account) {
             igUserId = igRes.data.instagram_business_account.id;
-            pageAccessToken = pageToken;
             this.logger.debug(`Found Instagram Business Account ID: ${igUserId} on Page: ${page.name}`);
-            break;
+            
+            // Get Instagram Profile username
+            const profileRes = await axios.get(`${this.baseUrl}/${igUserId}`, {
+              params: {
+                fields: 'username',
+                access_token: pageToken || accessToken,
+              },
+            });
+
+            availableAccounts.push({
+              igUserId: igUserId as string,
+              username: profileRes.data.username || 'unknown_user',
+              pageName: page.name
+            });
           }
         } catch (pageErr: any) {
           this.logger.warn(`Failed to fetch IG Business Account for page ${pageId}`, pageErr.response?.data || pageErr.message);
         }
       }
 
-      if (!igUserId) {
+      if (availableAccounts.length === 0) {
         throw new Error('Nenhuma conta do Instagram Business/Creator associada a estas páginas.');
       }
 
-      // 3. Get Instagram Profile username (Using User access token usually works if we have instagram_basic scope)
-      // Alternatively we could use the page access token which we obtained
-      this.logger.debug(`Fetching profile info for IG Account: ${igUserId}`);
-      const profileRes = await axios.get(`${this.baseUrl}/${igUserId}`, {
-        params: {
-          fields: 'username',
-          access_token: pageAccessToken || accessToken,
-        },
-      });
-
-      this.logger.debug(`Successfully fetched IG username: ${profileRes.data.username}`);
-
-      return {
-        igUserId,
-        username: profileRes.data.username || 'unknown_user',
-      };
+      return availableAccounts;
     } catch (error: any) {
-      this.logger.error('Erro ao buscar perfil do Instagram e Páginas', error.response?.data || error.message);
+      this.logger.error('Erro ao buscar contas do Instagram', error.response?.data || error.message);
       throw error;
     }
   }

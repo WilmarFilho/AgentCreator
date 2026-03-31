@@ -6,6 +6,7 @@ export class StartAnalysisDto {
   profileId: string;
   handle: string;
   accessToken: string;
+  igUserId: string;
 }
 
 @Controller('api/raio-x')
@@ -19,7 +20,14 @@ export class RaioXController {
       dto.profileId,
       dto.handle,
       dto.accessToken,
+      dto.igUserId
     );
+  }
+
+  @Get('accounts')
+  async getAvailableAccounts(@Query('token') token: string) {
+    if (!token) throw new Error('Token is required');
+    return await this.raioXService.getAvailableAccounts(token);
   }
 
   @Get('oauth/facebook')
@@ -46,11 +54,11 @@ export class RaioXController {
       const decoded = JSON.parse(Buffer.from(state, 'base64').toString('ascii'));
       if (!decoded.profileId) throw new Error('No profileId in state');
       
-      await this.raioXService.handleOauthCallback(code, decoded.profileId);
+      const token = await this.raioXService.handleOauthCallback(code, decoded.profileId);
       
-      // Lógica de Redirecionamento de Sucesso
+      // Redirect to selection page
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      return res.redirect(`${frontendUrl}/dashboard/raio-x?success=true`);
+      return res.redirect(`${frontendUrl}/dashboard/raio-x?step=select_account&token=${token}`);
 
     } catch (e: any) {
       console.error(e);

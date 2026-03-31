@@ -7,11 +7,14 @@ import { Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+type AccountInfo = { igUserId: string; username: string; pageName: string; };
+
 function RaioXContent() {
-  const [status, setStatus] = useState<'IDLE' | 'ANALYSING' | 'DONE'>('IDLE');
+  const [status, setStatus] = useState<'IDLE' | 'SELECT_ACCOUNT' | 'ANALYSING' | 'DONE'>('IDLE');
   const [persona, setPersona] = useState<any>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
+  const [availableAccounts, setAvailableAccounts] = useState<AccountInfo[]>([]);
 
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -36,7 +39,11 @@ function RaioXContent() {
             setStatus('DONE');
           } else {
             console.log("Nenhuma persona encontrada ou erro:", error?.message);
-            if (searchParams?.get('success') === 'true') {
+            if (searchParams?.get('step') === 'select_account' && searchParams?.get('token')) {
+              console.log("Detectado ?step=select_account na URL, entrando em modo SELECT_ACCOUNT");
+              setStatus('SELECT_ACCOUNT');
+              fetchAccounts(searchParams.get('token') as string);
+            } else if (searchParams?.get('success') === 'true') {
               console.log("Detectado ?success=true na URL, entrando em modo ANALYSING");
               setStatus('ANALYSING');
               router.replace('/dashboard/raio-x', { scroll: false });
@@ -47,6 +54,22 @@ function RaioXContent() {
       } catch (err) {
         console.error("Erro ao verificar persona:", err);
         if (mounted) setLoadingUser(false);
+      }
+    }
+
+    async function fetchAccounts(token: string) {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+        const res = await fetch(`${apiUrl}/api/raio-x/accounts?token=${token}`);
+        if (!res.ok) throw new Error('Falha ao buscar contas');
+        const data = await res.json();
+        if (mounted) setAvailableAccounts(data);
+      } catch (err) {
+        console.error("Erro ao buscar contas:", err);
+        if (mounted) {
+          alert('Erro ao buscar contas do Instagram. Tente conectar novamente.');
+          setStatus('IDLE');
+        }
       }
     }
 
@@ -118,11 +141,38 @@ function RaioXContent() {
       return;
     }
     
-    setStatus('ANALYSING');
+    setStatus('ANALYSING'); // Temporary state while redirecting
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
     const finalUrl = `${apiUrl}/api/raio-x/oauth/facebook?profileId=${userId}`;
     console.log("Redirecionando para:", finalUrl);
     window.location.href = finalUrl;
+  };
+
+  const handleAccountSelect = async (account: AccountInfo) => {
+    setStatus('ANALYSING');
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+      const token = searchParams?.get('token');
+      
+      const res = await fetch(`${apiUrl}/api/raio-x/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profileId: userId,
+          handle: account.username,
+          igUserId: account.igUserId,
+          accessToken: token
+        })
+      });
+      
+      if (!res.ok) throw new Error('Falha ao iniciar análise');
+      
+      router.replace('/dashboard/raio-x', { scroll: false });
+    } catch (e) {
+      console.error(e);
+      alert('Erro ao iniciar análise');
+      setStatus('IDLE');
+    }
   };
 
   if (loadingUser) {
@@ -148,6 +198,28 @@ function RaioXContent() {
       <div className="bg-zinc-900/40 border border-white/5 rounded-3xl shadow-2xl p-8 relative overflow-hidden backdrop-blur-2xl">
         {status === 'IDLE' && (
           <InstagramConnectForm onConnect={handleConnect} />
+        )}
+
+        {status === 'SELECT_ACCOUNT' && (
+          <div className="flex flex-col items-center justify-center py-10">
+            <h3 className="text-2xl font-bold text-white mb-6">Selecione a conta do Instagram</h3>
+            {availableAccounts.length === 0 ? (
+              <Loader2 className="w-10 h-10 text-brand animate-spin" />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl">
+                {availableAccounts.map(acc => (
+                  <button 
+                    key={acc.igUserId}
+                    onClick={() => handleAccountSelect(acc)}
+                    className="p-6 bg-zinc-800/50 hover:bg-zinc-700/80 border border-white/10 rounded-2xl flex flex-col items-start transition-all duration-200"
+                  >
+                    <span className="text-lg font-bold text-white tracking-wide">@{acc.username}</span>
+                    <span className="text-sm text-slate-400 mt-1">Página associada: {acc.pageName}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {status === 'ANALYSING' && (

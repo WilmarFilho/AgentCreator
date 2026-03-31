@@ -13,13 +13,13 @@ export class RaioXService {
     private openai: OpenaiService,
   ) { }
 
-  async startAnalysis(profileId: string, handle: string, accessToken: string) {
-    if (!profileId || !handle || !accessToken) {
-      throw new Error('Missing require parameters (profileId, handle or token)');
+  async startAnalysis(profileId: string, handle: string, accessToken: string, igUserId: string) {
+    if (!profileId || !handle || !accessToken || !igUserId) {
+      throw new Error('Missing require parameters (profileId, handle, token or igUserId)');
     }
 
     // Execute the async flow without blocking the HTTP request (fire-and-forget for MVP)
-    this.runAsyncFlow(profileId, handle, accessToken, `mock-${handle}`).catch((err) => {
+    this.runAsyncFlow(profileId, handle, accessToken, igUserId).catch((err) => {
       this.logger.error('Background flow failed', err);
     });
 
@@ -30,21 +30,15 @@ export class RaioXService {
     return this.instagram.getAuthorizationUrl(profileId);
   }
 
-  async handleOauthCallback(code: string, profileId: string): Promise<void> {
+  async handleOauthCallback(code: string, profileId: string): Promise<string> {
     this.logger.log(`Exchanging OAuth code for token for profile ${profileId}`);
-
-    // 1. Troca o 'code' temporário pela Access Token de longa duração
     const accessToken = await this.instagram.exchangeCodeForToken(code);
-
     this.logger.log(`Access Token: ${accessToken}`);
+    return accessToken;
+  }
 
-    // 2. Busca o @username e ID do Instagram da pessoa logada
-    const { igUserId, username } = await this.instagram.getIgProfileInfo(accessToken);
-
-    // 3. Roda o fluxo assíncrono normalmente
-    this.runAsyncFlow(profileId, username, accessToken, igUserId).catch((err) => {
-      this.logger.error('Background flow failed after OAuth', err);
-    });
+  async getAvailableAccounts(token: string) {
+    return await this.instagram.getAvailableIgAccounts(token);
   }
 
   private async runAsyncFlow(profileId: string, handle: string, token: string, igUserId: string) {
@@ -57,13 +51,13 @@ export class RaioXService {
 
     // 2. Save Posts to DB
     for (const post of posts) {
-      const { error } = await sbClient.from('post_metrics').upsert({
+      const { error } = await sbClient.from('post_metrics').insert({
         profile_id: profileId,
         ig_media_id: post.id,
         media_type: post.media_type,
         caption: post.caption,
         posted_at: post.timestamp,
-      }, { onConflict: 'ig_media_id' }); // Note: onConflict requires the exact constraint setup, we might just insert for now if we don't have unique constraint.
+      });
       if (error) {
         this.logger.warn(`Could not insert metric for post ${post.id}: ${error.message}`);
       }
