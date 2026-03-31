@@ -1,20 +1,212 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
 import InstagramConnectForm from '@/components/raio-x/InstagramConnectForm';
 import PersonaResult from '../../../components/raio-x/PersonaResult';
-import { Loader2, Image, Film, Type, Sparkles } from 'lucide-react';
+import { Loader2, Image, Film, Type, Sparkles, ChevronDown, Save, CheckCircle2, Target } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 type AccountInfo = { igUserId: string; username: string; pageName: string; };
 
-const mediaTypeConfig: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
-  IMAGE: { icon: <Image className="w-3.5 h-3.5" />, label: 'Foto', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-  VIDEO: { icon: <Film className="w-3.5 h-3.5" />, label: 'Vídeo', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
-  CAROUSEL_ALBUM: { icon: <Sparkles className="w-3.5 h-3.5" />, label: 'Carrossel', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const INITIAL_VISIBLE_POSTS = 10;
+
+// ─── PostCard (memoized for performance) ──────────────────────────────
+const PostCard = ({ post }: { post: any }) => {
+  const isVideo = post.media_type === 'VIDEO';
+  const isCarousel = post.media_type === 'CAROUSEL_ALBUM';
+
+  const mediaPath = isVideo ? post.media_storage_path : (post.thumbnail_storage_path || post.media_storage_path);
+  const mediaUrl = mediaPath
+    ? `${SUPABASE_URL}/storage/v1/object/public/raio-x-media/${mediaPath}`
+    : null;
+
+  const config = isVideo
+    ? { label: 'Vídeo', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' }
+    : isCarousel
+      ? { label: 'Carrossel', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' }
+      : { label: 'Foto', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' };
+
+  return (
+    <div className="bg-zinc-800/50 rounded-xl border border-white/5 overflow-hidden hover:border-white/15 transition-all group hover:shadow-lg hover:shadow-black/20">
+      <div className="relative aspect-square bg-zinc-900/80 overflow-hidden">
+        {mediaUrl ? (
+          isVideo ? (
+            <video
+              src={mediaUrl}
+              className="w-full h-full object-cover"
+              muted
+              playsInline
+              preload="metadata"
+              onMouseEnter={(e) => (e.target as HTMLVideoElement).play().catch(() => {})}
+              onMouseLeave={(e) => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0; }}
+            />
+          ) : (
+            <img
+              src={mediaUrl}
+              alt={post.caption?.substring(0, 50) || 'Post'}
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+              loading="lazy"
+              decoding="async"
+            />
+          )
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-slate-600">
+            {isVideo ? <Film className="w-10 h-10" /> : <Image className="w-10 h-10" />}
+          </div>
+        )}
+
+        {isVideo && mediaUrl && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none group-hover:opacity-0 transition-opacity">
+            <div className="w-10 h-10 rounded-full bg-black/50 backdrop-blur flex items-center justify-center">
+              <Film className="w-5 h-5 text-white" />
+            </div>
+          </div>
+        )}
+
+        {isCarousel && (
+          <div className="absolute top-2 right-2">
+            <div className="bg-black/50 backdrop-blur rounded-md p-1">
+              <Sparkles className="w-3.5 h-3.5 text-white" />
+            </div>
+          </div>
+        )}
+
+        <div className="absolute bottom-2 left-2">
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border backdrop-blur-sm ${config.color}`}>
+            {isVideo ? <Film className="w-3 h-3" /> : isCarousel ? <Sparkles className="w-3 h-3" /> : <Image className="w-3 h-3" />}
+            {config.label}
+          </span>
+        </div>
+      </div>
+
+      <div className="p-3">
+        <span className="text-[10px] text-slate-500 block mb-1">
+          {new Date(post.posted_at).toLocaleDateString('pt-BR')}
+        </span>
+        <p className="text-xs text-slate-400 line-clamp-3 leading-relaxed">
+          {post.caption || <span className="italic text-slate-600">Sem legenda</span>}
+        </p>
+      </div>
+    </div>
+  );
 };
 
+// ─── ObjectivesForm ───────────────────────────────────────────────────
+const OBJECTIVES_FIELDS = [
+  { key: 'business_type', label: 'Tipo de Negócio', placeholder: 'Ex: Loja de roupas, Coach, SaaS, Infoproduto...' },
+  { key: 'target_audience', label: 'Público-Alvo', placeholder: 'Ex: Mulheres 25-40, empreendedores iniciantes...' },
+  { key: 'content_goals', label: 'Objetivos com Conteúdo', placeholder: 'Ex: Gerar autoridade, vender cursos, atrair clientes...' },
+  { key: 'monetization_strategy', label: 'Estratégia de Monetização', placeholder: 'Ex: Vendas diretas, afiliados, consultorias...' },
+  { key: 'brand_values', label: 'Valores da Marca', placeholder: 'Ex: Transparência, inovação, proximidade...' },
+  { key: 'competitors', label: 'Concorrentes/Referências', placeholder: 'Ex: @fulano, @ciclano, marca X...' },
+  { key: 'extra_notes', label: 'Observações Extras', placeholder: 'Informações adicionais relevantes...' },
+];
+
+function ObjectivesForm({ profileId }: { profileId: string }) {
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!profileId) return;
+    fetch(`${API_URL}/api/raio-x/objectives?profileId=${profileId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data) {
+          const existing: Record<string, string> = {};
+          OBJECTIVES_FIELDS.forEach(f => {
+            if (data[f.key]) existing[f.key] = data[f.key];
+          });
+          setForm(existing);
+        }
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, [profileId]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      const res = await fetch(`${API_URL}/api/raio-x/objectives`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId, objectives: form }),
+      });
+      if (res.ok) setSaved(true);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!loaded) return null;
+
+  return (
+    <div className="bg-zinc-900/60 border border-white/5 rounded-3xl p-8 backdrop-blur-2xl animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="w-10 h-10 bg-brand/10 text-brand rounded-xl flex items-center justify-center">
+          <Target size={20} />
+        </div>
+        <div>
+          <h3 className="text-xl font-bold text-white">Seus Objetivos</h3>
+          <p className="text-sm text-slate-500">Essas informações serão usadas para personalizar sugestões e estratégias de conteúdo.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {OBJECTIVES_FIELDS.map(field => (
+          <div key={field.key} className={field.key === 'extra_notes' ? 'md:col-span-2' : ''}>
+            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+              {field.label}
+            </label>
+            {field.key === 'extra_notes' ? (
+              <textarea
+                value={form[field.key] || ''}
+                onChange={e => setForm(prev => ({ ...prev, [field.key]: e.target.value }))}
+                placeholder={field.placeholder}
+                rows={3}
+                className="w-full bg-zinc-800/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/30 transition-colors resize-none"
+              />
+            ) : (
+              <input
+                type="text"
+                value={form[field.key] || ''}
+                onChange={e => setForm(prev => ({ ...prev, [field.key]: e.target.value }))}
+                placeholder={field.placeholder}
+                className="w-full bg-zinc-800/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/30 transition-colors"
+              />
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex justify-end mt-6">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-2 bg-brand text-white font-bold py-3 px-6 rounded-xl hover:bg-brand/90 transition-all active:scale-95 disabled:opacity-50"
+        >
+          {saving ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : saved ? (
+            <CheckCircle2 className="w-4 h-4" />
+          ) : (
+            <Save className="w-4 h-4" />
+          )}
+          {saved ? 'Salvo!' : 'Salvar Objetivos'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Content ─────────────────────────────────────────────────────
 function RaioXContent() {
   const [status, setStatus] = useState<'IDLE' | 'SELECT_ACCOUNT' | 'ANALYSING' | 'DONE'>('IDLE');
   const [persona, setPersona] = useState<any>(null);
@@ -22,33 +214,30 @@ function RaioXContent() {
   const [loadingUser, setLoadingUser] = useState(true);
   const [availableAccounts, setAvailableAccounts] = useState<AccountInfo[]>([]);
   const [analyzedPosts, setAnalyzedPosts] = useState<any[]>([]);
+  const [showAllPosts, setShowAllPosts] = useState(false);
 
-  const fetchPosts = async (uid: string) => {
+  const fetchPosts = useCallback(async (uid: string) => {
     try {
       const { data, error } = await supabase.from('post_metrics')
-        .select('*')
+        .select('id,media_type,caption,posted_at,media_storage_path,thumbnail_storage_path')
         .eq('profile_id', uid)
         .order('posted_at', { ascending: false })
-        .limit(30);
-      if (data && !error) {
-        setAnalyzedPosts(data);
-      }
+        .limit(20);
+      if (data && !error) setAnalyzedPosts(data);
     } catch (err) {
       console.error(err);
     }
-  };
+  }, []);
 
   const searchParams = useSearchParams();
   const router = useRouter();
 
   useEffect(() => {
     let mounted = true;
-    console.log("RaioXContent mounted, checking session...");
 
     async function checkExistingPersona(uid: string) {
       if (!mounted) return;
       try {
-        console.log("Checking existing persona for user:", uid);
         const { data, error } = await supabase.from('brand_personas')
           .select('*')
           .eq('profile_id', uid)
@@ -56,18 +245,14 @@ function RaioXContent() {
 
         if (mounted) {
           if (data && !error) {
-            console.log("Persona encontrada:", data.id);
             setPersona(data);
             setStatus('DONE');
             fetchPosts(uid);
           } else {
-            console.log("Nenhuma persona encontrada ou erro:", error?.message);
             if (searchParams?.get('step') === 'select_account' && searchParams?.get('token')) {
-              console.log("Detectado ?step=select_account na URL, entrando em modo SELECT_ACCOUNT");
               setStatus('SELECT_ACCOUNT');
               fetchAccounts(searchParams.get('token') as string);
             } else if (searchParams?.get('success') === 'true') {
-              console.log("Detectado ??success=true na URL, entrando em modo ANALYSING");
               setStatus('ANALYSING');
               router.replace('/dashboard/raio-x', { scroll: false });
             }
@@ -75,20 +260,19 @@ function RaioXContent() {
           setLoadingUser(false);
         }
       } catch (err) {
-        console.error("Erro ao verificar persona:", err);
+        console.error(err);
         if (mounted) setLoadingUser(false);
       }
     }
 
     async function fetchAccounts(token: string) {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-        const res = await fetch(`${apiUrl}/api/raio-x/accounts?token=${token}`);
+        const res = await fetch(`${API_URL}/api/raio-x/accounts?token=${token}`);
         if (!res.ok) throw new Error('Falha ao buscar contas');
         const data = await res.json();
         if (mounted) setAvailableAccounts(data);
       } catch (err) {
-        console.error("Erro ao buscar contas:", err);
+        console.error(err);
         if (mounted) {
           alert('Erro ao buscar contas do Instagram. Tente conectar novamente.');
           setStatus('IDLE');
@@ -96,86 +280,61 @@ function RaioXContent() {
       }
     }
 
-    // 1. Initial check
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (mounted) {
         if (session?.user) {
-          console.log("Sessão inicial encontrada:", session.user.id);
           setUserId(session.user.id);
           checkExistingPersona(session.user.id);
         } else {
-          console.warn("Nenhuma sessão inicial encontrada.");
           setLoadingUser(false);
         }
       }
     });
 
-    // 2. Listen for changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("Auth state change event:", event, session?.user?.id);
-      if (mounted && session?.user) {
-        setUserId(session.user.id);
-      }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      if (mounted && session?.user) setUserId(session.user.id);
     });
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [searchParams, router]);
+  }, [searchParams, router, fetchPosts]);
 
   useEffect(() => {
     if (status === 'ANALYSING' && userId) {
-      console.log("Iniciando Realtime listener para brand_personas...");
       const channel = supabase
         .channel('brand_personas_changes')
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'brand_personas',
-            filter: `profile_id=eq.${userId}`,
-          },
-          (payload: any) => {
-            console.log("Nova persona detectada via Realtime!", payload.new);
-            setPersona(payload.new);
-            setStatus('DONE');
-            fetchPosts(userId);
-          }
-        )
-        .subscribe((status) => {
-          console.log("Realtime subscription status:", status);
-        });
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'brand_personas',
+          filter: `profile_id=eq.${userId}`,
+        }, (payload: any) => {
+          setPersona(payload.new);
+          setStatus('DONE');
+          fetchPosts(userId);
+        })
+        .subscribe();
 
-      return () => {
-        console.log("Limpando Realtime listener.");
-        supabase.removeChannel(channel);
-      };
+      return () => { supabase.removeChannel(channel); };
     }
-  }, [status, userId]);
+  }, [status, userId, fetchPosts]);
 
   const handleConnect = () => {
-    console.log("Botão de conectar clicado. userId atual:", userId);
     if (!userId) {
-      alert("Aguardando carregamento da sessão... Verifique se você está logado.");
+      alert("Aguardando carregamento da sessão...");
       return;
     }
-
     setStatus('ANALYSING');
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-    const finalUrl = `${apiUrl}/api/raio-x/oauth/facebook?profileId=${userId}`;
-    console.log("Redirecionando para:", finalUrl);
-    window.location.href = finalUrl;
+    window.location.href = `${API_URL}/api/raio-x/oauth/facebook?profileId=${userId}`;
   };
 
   const handleAccountSelect = async (account: AccountInfo) => {
     setStatus('ANALYSING');
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
       const token = searchParams?.get('token');
-
-      const res = await fetch(`${apiUrl}/api/raio-x/start`, {
+      const res = await fetch(`${API_URL}/api/raio-x/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -185,9 +344,7 @@ function RaioXContent() {
           accessToken: token
         })
       });
-
       if (!res.ok) throw new Error('Falha ao iniciar análise');
-
       router.replace('/dashboard/raio-x', { scroll: false });
     } catch (e) {
       console.error(e);
@@ -196,12 +353,16 @@ function RaioXContent() {
     }
   };
 
-  // Count content types for stats
-  const postStats = {
+  const postStats = useMemo(() => ({
     images: analyzedPosts.filter(p => p.media_type === 'IMAGE').length,
     videos: analyzedPosts.filter(p => p.media_type === 'VIDEO').length,
     carousels: analyzedPosts.filter(p => p.media_type === 'CAROUSEL_ALBUM').length,
-  };
+  }), [analyzedPosts]);
+
+  const visiblePosts = useMemo(() =>
+    showAllPosts ? analyzedPosts : analyzedPosts.slice(0, INITIAL_VISIBLE_POSTS),
+    [analyzedPosts, showAllPosts]
+  );
 
   if (loadingUser) {
     return (
@@ -280,12 +441,13 @@ function RaioXContent() {
         {status === 'DONE' && persona && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-1000">
             <PersonaResult persona={persona} />
-            
+
+            {/* Posts Grid */}
             {analyzedPosts.length > 0 && (
               <div className="bg-zinc-900/60 border border-white/5 rounded-3xl p-8 backdrop-blur-2xl">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-4">
                   <h3 className="text-2xl font-bold text-white">Posts Analisados</h3>
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 flex-wrap">
                     {postStats.images > 0 && (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-blue-500/15 text-blue-400 border border-blue-500/20">
                         <Image className="w-3.5 h-3.5" />
@@ -309,71 +471,30 @@ function RaioXContent() {
                     </span>
                   </div>
                 </div>
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-4">
-                  {analyzedPosts.map(post => {
-                    const config = mediaTypeConfig[post.media_type] || mediaTypeConfig.IMAGE;
-                    const thumbnailPath = post.thumbnail_storage_path || post.media_storage_path;
-                    const imageUrl = thumbnailPath
-                      ? `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/raio-x-media/${thumbnailPath}`
-                      : null;
-
-                    return (
-                      <div key={post.id} className="bg-zinc-800/50 rounded-xl border border-white/5 overflow-hidden hover:border-white/15 transition-all group hover:shadow-lg hover:shadow-black/20">
-                        {/* Media preview */}
-                        <div className="relative aspect-square bg-zinc-900/80 overflow-hidden">
-                          {imageUrl ? (
-                            <img
-                              src={imageUrl}
-                              alt={post.caption?.substring(0, 50) || 'Post'}
-                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-slate-600">
-                              {post.media_type === 'VIDEO' ? <Film className="w-10 h-10" /> : <Image className="w-10 h-10" />}
-                            </div>
-                          )}
-
-                          {/* Video play overlay */}
-                          {post.media_type === 'VIDEO' && imageUrl && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                              <div className="w-10 h-10 rounded-full bg-black/50 backdrop-blur flex items-center justify-center">
-                                <Film className="w-5 h-5 text-white" />
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Carousel indicator */}
-                          {post.media_type === 'CAROUSEL_ALBUM' && (
-                            <div className="absolute top-2 right-2">
-                              <div className="bg-black/50 backdrop-blur rounded-md p-1">
-                                <Sparkles className="w-3.5 h-3.5 text-white" />
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Type badge */}
-                          <div className="absolute bottom-2 left-2">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border backdrop-blur-sm ${config.color}`}>
-                              {config.icon}
-                              {config.label}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Caption */}
-                        <div className="p-3">
-                          <span className="text-[10px] text-slate-500 block mb-1">{new Date(post.posted_at).toLocaleDateString('pt-BR')}</span>
-                          <p className="text-xs text-slate-400 line-clamp-3 leading-relaxed">
-                            {post.caption || <span className="italic text-slate-600">Sem legenda</span>}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {visiblePosts.map(post => (
+                    <PostCard key={post.id} post={post} />
+                  ))}
                 </div>
+
+                {/* Show More Button */}
+                {!showAllPosts && analyzedPosts.length > INITIAL_VISIBLE_POSTS && (
+                  <div className="flex justify-center mt-6">
+                    <button
+                      onClick={() => setShowAllPosts(true)}
+                      className="flex items-center gap-2 px-6 py-2.5 bg-zinc-800/60 hover:bg-zinc-700/60 border border-white/10 rounded-xl text-sm text-slate-300 font-medium transition-colors"
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                      Ver todos ({analyzedPosts.length - INITIAL_VISIBLE_POSTS} restantes)
+                    </button>
+                  </div>
+                )}
               </div>
             )}
+
+            {/* Creator Objectives Form */}
+            {userId && <ObjectivesForm profileId={userId} />}
           </div>
         )}
       </div>

@@ -42,6 +42,69 @@ export class RaioXService {
     return await this.instagram.getAvailableIgAccounts(token);
   }
 
+  async saveObjectives(profileId: string, objectives: Record<string, string>) {
+    const sbClient = this.supabase.getClient();
+    const { data, error } = await sbClient.from('creator_objectives').upsert({
+      profile_id: profileId,
+      business_type: objectives.business_type || null,
+      target_audience: objectives.target_audience || null,
+      content_goals: objectives.content_goals || null,
+      monetization_strategy: objectives.monetization_strategy || null,
+      brand_values: objectives.brand_values || null,
+      competitors: objectives.competitors || null,
+      extra_notes: objectives.extra_notes || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'profile_id' }).select().single();
+
+    if (error) {
+      this.logger.error('Failed to save objectives:', error.message);
+      throw error;
+    }
+
+    // Also save objectives to RAG for future consumption
+    const objectivesText = Object.entries(objectives)
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\n');
+
+    if (objectivesText.length > 10) {
+      try {
+        const embedding = await this.openai.generateEmbedding(`Objetivos do criador:\n${objectivesText}`);
+        // Remove old objectives RAG doc
+        await sbClient.from('profile_rag_documents')
+          .delete()
+          .eq('profile_id', profileId)
+          .eq('source_type', 'persona_summary')
+          .like('content', 'Objetivos do criador%');
+
+        await sbClient.from('profile_rag_documents').insert({
+          profile_id: profileId,
+          source_type: 'persona_summary',
+          content: `Objetivos do criador:\n${objectivesText}`,
+          embedding: JSON.stringify(embedding),
+          metadata: { type: 'creator_objectives', updated_at: new Date().toISOString() },
+        });
+      } catch (err: any) {
+        this.logger.warn(`Failed to save objectives to RAG: ${err.message}`);
+      }
+    }
+
+    return data;
+  }
+
+  async getObjectives(profileId: string) {
+    const sbClient = this.supabase.getClient();
+    const { data, error } = await sbClient.from('creator_objectives')
+      .select('*')
+      .eq('profile_id', profileId)
+      .single();
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 = not found
+      this.logger.error('Failed to get objectives:', error.message);
+    }
+    return data || null;
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // DEEP ANALYSIS FLOW
   // ═══════════════════════════════════════════════════════════════════════
@@ -54,9 +117,9 @@ export class RaioXService {
     this.logger.log('🧹 Cleaning up previous analysis data...');
     await this.cleanupPreviousAnalysis(profileId);
 
-    // ─── STEP 1: Fetch 30 posts (with pagination) ─────────────────────
-    this.logger.log('📥 Fetching up to 30 Instagram posts...');
-    const posts = await this.instagram.fetchUserPosts(igUserId, token, 30);
+    // ─── STEP 1: Fetch 20 posts (with pagination) ─────────────────────
+    this.logger.log('📥 Fetching up to 20 Instagram posts...');
+    const posts = await this.instagram.fetchUserPosts(igUserId, token, 20);
     this.logger.log(`Fetched ${posts.length} posts total.`);
 
     if (posts.length === 0) {

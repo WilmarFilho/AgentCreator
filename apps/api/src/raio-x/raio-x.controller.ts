@@ -62,9 +62,19 @@ export class RaioXController {
 
     } catch (e: any) {
       console.error(e);
-      // Redirecionamento de Erro
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       return res.redirect(`${frontendUrl}/dashboard/raio-x?error=oauth_failed`);
     }
+  }
+
+  @Post('objectives')
+  async saveObjectives(@Body() dto: { profileId: string; objectives: Record<string, string> }) {
+    return await this.raioXService.saveObjectives(dto.profileId, dto.objectives);
+  }
+
+  @Get('objectives')
+  async getObjectives(@Query('profileId') profileId: string) {
+    if (!profileId) throw new Error('profileId is required');
+    return await this.raioXService.getObjectives(profileId);
   }
 }

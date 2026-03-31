@@ -28,9 +28,24 @@ export class OpenaiService {
   }
 
   // ─── VISION: Analyze an Instagram post image ─────────────────────────
-  async analyzeImage(imageUrl: string): Promise<string> {
-    this.logger.debug(`Analyzing image with GPT-4o Vision: ${imageUrl.substring(0, 80)}...`);
+  async analyzeImage(imageUrl: string, imageBuffer?: Buffer): Promise<string> {
+    this.logger.debug(`Analyzing image with GPT-4o Vision...`);
     try {
+      // Download image and convert to base64 (Instagram CDN URLs are temporary and OpenAI can't access them)
+      let base64Data: string;
+      if (imageBuffer) {
+        base64Data = imageBuffer.toString('base64');
+      } else {
+        const axios = (await import('axios')).default;
+        const response = await axios.get(imageUrl, {
+          responseType: 'arraybuffer',
+          timeout: 30000,
+        });
+        base64Data = Buffer.from(response.data).toString('base64');
+      }
+
+      const dataUri = `data:image/jpeg;base64,${base64Data}`;
+
       const response = await this.openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [
@@ -50,7 +65,7 @@ Responda em Português Brasileiro de forma estruturada e concisa (máximo 300 pa
             content: [
               {
                 type: 'image_url',
-                image_url: { url: imageUrl, detail: 'low' },
+                image_url: { url: dataUri, detail: 'low' },
               },
             ],
           },
