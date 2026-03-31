@@ -1,0 +1,47 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Create project directory if it doesn't exist
+            mkdir -p ~/agent-creator
+            cd ~/agent-creator
+
+            # Initialize git if not already present
+            if [ ! -d ".git" ]; then
+              git clone https://github.com/${{ github.repository }}.git .
+            else
+              git pull origin main
+            fi
+
+            # Create/Update API environment variables
+            echo "${{ secrets.API_ENV_PRODUCTION }}" > apps/api/.env
+
+            # Create/Update Web environment variables
+            echo "${{ secrets.WEB_ENV_PRODUCTION }}" > apps/web/.env.local
+
+            # Extract specific variables for docker-compose build args from WEB_ENV_PRODUCTION
+            # This is a helper to ensure Next.js build-time variables are available to docker-compose
+            export NEXT_PUBLIC_SUPABASE_URL=$(grep NEXT_PUBLIC_SUPABASE_URL apps/web/.env.local | cut -d '=' -f2)
+            export NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=$(grep NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY apps/web/.env.local | cut -d '=' -f2)
+            export NEXT_PUBLIC_API_URL=$(grep NEXT_PUBLIC_API_URL apps/web/.env.local | cut -d '=' -f2)
+
+            # Build and restart containers
+            docker compose up -d --build

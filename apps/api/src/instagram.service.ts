@@ -11,15 +11,15 @@ export interface InstagramPost {
 @Injectable()
 export class InstagramService {
   private readonly logger = new Logger(InstagramService.name);
-  private readonly baseUrl = 'https://graph.instagram.com';
+  private readonly baseUrl = 'https://graph.facebook.com/v19.0';
 
   constructor() {}
 
-  async fetchUserPosts(accessToken: string, limit: number = 20): Promise<InstagramPost[]> {
-    this.logger.log(`Fetching latest ${limit} posts from Instagram...`);
+  async fetchUserPosts(igUserId: string, accessToken: string, limit: number = 20): Promise<InstagramPost[]> {
+    this.logger.debug(`Fetching latest ${limit} posts from Instagram for IG User: ${igUserId}...`);
     try {
       // Instagram Graph API endpoint base for getting user media
-      const response = await axios.get(`${this.baseUrl}/me/media`, {
+      const response = await axios.get(`${this.baseUrl}/${igUserId}/media`, {
         params: {
           fields: 'id,caption,media_type,media_url,timestamp',
           access_token: accessToken,
@@ -39,6 +39,7 @@ export class InstagramService {
         timestamp: post.timestamp,
       }));
 
+      this.logger.debug(`Fetched ${posts.length} posts successfully.`);
       return posts;
     } catch (error: any) {
       this.logger.error('Failed to fetch Instagram posts', error.response?.data || error.message);
@@ -85,23 +86,68 @@ export class InstagramService {
   }
 
   async getIgProfileInfo(accessToken: string): Promise<{ igUserId: string; username: string }> {
+    this.logger.debug('Fetching Facebook Pages to find Instagram Business Account...');
     try {
-      // Simplest approach using Basic Display API endpoint
-      // Note: Actual implementation depends on Basic API vs Graph API. This mocks Graph's /me 
-      const response = await axios.get(`${this.baseUrl}/me`, {
+      // 1. Get User's Pages
+      const pagesRes = await axios.get(`${this.baseUrl}/me/accounts`, {
+        params: { access_token: accessToken },
+      });
+      const pages = pagesRes.data.data;
+      if (!pages || pages.length === 0) {
+        throw new Error('Nenhuma página do Facebook encontrada para este usuário.');
+      }
+      this.logger.debug(`Found ${pages.length} pages: ${pages.map((p: any) => p.name).join(', ')}`);
+
+      // 2. Find Instagram Business Account linked to one of these pages
+      let igUserId: string | null = null;
+      let pageAccessToken: string | null = null;
+      
+      for (const page of pages) {
+        const pageId = page.id;
+        const pageToken = page.access_token;
+        
+        try {
+          const igRes = await axios.get(`${this.baseUrl}/${pageId}`, {
+            params: {
+              fields: 'instagram_business_account',
+              access_token: pageToken,
+            },
+          });
+          
+          if (igRes.data.instagram_business_account) {
+            igUserId = igRes.data.instagram_business_account.id;
+            pageAccessToken = pageToken;
+            this.logger.debug(`Found Instagram Business Account ID: ${igUserId} on Page: ${page.name}`);
+            break;
+          }
+        } catch (pageErr: any) {
+          this.logger.warn(`Failed to fetch IG Business Account for page ${pageId}`, pageErr.response?.data || pageErr.message);
+        }
+      }
+
+      if (!igUserId) {
+        throw new Error('Nenhuma conta do Instagram Business/Creator associada a estas páginas.');
+      }
+
+      // 3. Get Instagram Profile username (Using User access token usually works if we have instagram_basic scope)
+      // Alternatively we could use the page access token which we obtained
+      this.logger.debug(`Fetching profile info for IG Account: ${igUserId}`);
+      const profileRes = await axios.get(`${this.baseUrl}/${igUserId}`, {
         params: {
-          fields: 'id,username',
-          access_token: accessToken,
+          fields: 'username',
+          access_token: pageAccessToken || accessToken,
         },
       });
+
+      this.logger.debug(`Successfully fetched IG username: ${profileRes.data.username}`);
+
       return {
-        igUserId: response.data.id,
-        username: response.data.username || 'unknown_user',
+        igUserId,
+        username: profileRes.data.username || 'unknown_user',
       };
     } catch (error: any) {
-      this.logger.error('Erro ao buscar dados do perfil', error.response?.data || error.message);
-      // Fallback for MVP if using standard Facebook Graph Token before fetching specific Page
-      return { igUserId: 'mock-ig-id-after-oauth', username: 'connected_user' };
+      this.logger.error('Erro ao buscar perfil do Instagram e Páginas', error.response?.data || error.message);
+      throw error;
     }
   }
 }

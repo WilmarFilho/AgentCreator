@@ -51,7 +51,7 @@ export class RaioXService {
 
     // 1. Fetch Instagram Posts
     this.logger.log('Fetching Instagram Posts...');
-    const posts = await this.instagram.fetchUserPosts(token, 10);
+    const posts = await this.instagram.fetchUserPosts(igUserId, token, 10);
     
     // 2. Save Posts to DB
     for (const post of posts) {

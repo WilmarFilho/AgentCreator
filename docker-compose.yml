@@ -1,0 +1,30 @@
+services:
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: agent-creator-api
+    restart: always
+    ports:
+      - "3011:3000"
+    env_file:
+      - ./apps/api/.env
+    environment:
+      - PORT=3000
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+        - NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY}
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+    container_name: agent-creator-web
+    restart: always
+    ports:
+      - "3012:3000"
+    env_file:
+      - ./apps/web/.env.local
+    environment:
+      - PORT=3000

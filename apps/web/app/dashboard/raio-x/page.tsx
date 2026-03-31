@@ -1,29 +1,138 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import InstagramConnectForm from '@/components/raio-x/InstagramConnectForm';
 import PersonaResult from '../../../components/raio-x/PersonaResult';
 import { Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function RaioXPage() {
+function RaioXContent() {
   const [status, setStatus] = useState<'IDLE' | 'ANALYSING' | 'DONE'>('IDLE');
   const [persona, setPersona] = useState<any>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [loadingUser, setLoadingUser] = useState(true);
+
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  useEffect(() => {
+    let mounted = true;
+    console.log("RaioXContent mounted, checking session...");
+
+    async function checkExistingPersona(uid: string) {
+      if (!mounted) return;
+      try {
+        console.log("Checking existing persona for user:", uid);
+        const { data, error } = await supabase.from('brand_personas')
+          .select('*')
+          .eq('profile_id', uid)
+          .single();
+
+        if (mounted) {
+          if (data && !error) {
+            console.log("Persona encontrada:", data.id);
+            setPersona(data);
+            setStatus('DONE');
+          } else {
+            console.log("Nenhuma persona encontrada ou erro:", error?.message);
+            if (searchParams?.get('success') === 'true') {
+              console.log("Detectado ?success=true na URL, entrando em modo ANALYSING");
+              setStatus('ANALYSING');
+              router.replace('/dashboard/raio-x', { scroll: false });
+            }
+          }
+          setLoadingUser(false);
+        }
+      } catch (err) {
+        console.error("Erro ao verificar persona:", err);
+        if (mounted) setLoadingUser(false);
+      }
+    }
+
+    // 1. Initial check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (mounted) {
+        if (session?.user) {
+          console.log("Sessão inicial encontrada:", session.user.id);
+          setUserId(session.user.id);
+          checkExistingPersona(session.user.id);
+        } else {
+          console.warn("Nenhuma sessão inicial encontrada.");
+          setLoadingUser(false);
+        }
+      }
+    });
+
+    // 2. Listen for changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("Auth state change event:", event, session?.user?.id);
+      if (mounted && session?.user) {
+        setUserId(session.user.id);
+        if (status === 'IDLE' && !persona) {
+          checkExistingPersona(session.user.id);
+        }
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [searchParams, router, status, persona]);
+
+  useEffect(() => {
+    if (status === 'ANALYSING' && userId) {
+      console.log("Iniciando Realtime listener para brand_personas...");
+      const channel = supabase
+        .channel('brand_personas_changes')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'brand_personas',
+            filter: `profile_id=eq.${userId}`,
+          },
+          (payload: any) => {
+            console.log("Nova persona detectada via Realtime!", payload.new);
+            setPersona(payload.new);
+            setStatus('DONE');
+          }
+        )
+        .subscribe((status) => {
+          console.log("Realtime subscription status:", status);
+        });
+
+      return () => {
+        console.log("Limpando Realtime listener.");
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [status, userId]);
 
   const handleConnect = () => {
+    console.log("Botão de conectar clicado. userId atual:", userId);
+    if (!userId) {
+      alert("Aguardando carregamento da sessão... Verifique se você está logado.");
+      return;
+    }
+    
     setStatus('ANALYSING');
-
-    // MOCK TIMEOUT
-    setTimeout(() => {
-      setPersona({
-        primary_goal: 'authority',
-        content_niche: 'Marketing Digital e Criação de SaaS',
-        tone_of_voice: 'Direto, sofisticado, motivador e especialista.',
-        psychological_profile: 'Criador inovador, focado em alta performance e design premium.',
-        visual_preferences: { colors: 'Preto, Branco, Vermelho Vibrante', style: 'Minimalista, Glassmorphism' }
-      });
-      setStatus('DONE');
-    }, 3000);
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+    const finalUrl = `${apiUrl}/api/raio-x/oauth/facebook?profileId=${userId}`;
+    console.log("Redirecionando para:", finalUrl);
+    window.location.href = finalUrl;
   };
+
+  if (loadingUser) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <Loader2 className="w-10 h-10 text-brand animate-spin mb-4" />
+        <p className="text-slate-400">Verificando sessão...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-screen-2xl mx-auto py-6">
@@ -32,7 +141,7 @@ export default function RaioXPage() {
           Raio-X do Criador
         </h1>
         <p className="text-lg text-slate-400 max-w-2xl mx-auto">
-          Vamos mapear a sua essência. Conecte seu perfil para que a nossa IA analise os posts e desenhe a sua Brand Persona oficial. (MOCK MODE)
+          Vamos mapear a sua essência. Conecte seu perfil para que a nossa IA analise os posts e desenhe a sua Brand Persona oficial.
         </p>
       </div>
 
@@ -56,5 +165,13 @@ export default function RaioXPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function RaioXPage() {
+  return (
+    <Suspense fallback={<div className="flex justify-center flex-col items-center py-20"><Loader2 className="w-8 h-8 animate-spin text-white mb-4" /><span className="text-white">Carregando...</span></div>}>
+      <RaioXContent />
+    </Suspense>
   );
 }
