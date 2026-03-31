@@ -11,7 +11,7 @@ export class RaioXService {
     private supabase: SupabaseService,
     private instagram: InstagramService,
     private openai: OpenaiService,
-  ) {}
+  ) { }
 
   async startAnalysis(profileId: string, handle: string, accessToken: string) {
     if (!profileId || !handle || !accessToken) {
@@ -32,10 +32,12 @@ export class RaioXService {
 
   async handleOauthCallback(code: string, profileId: string): Promise<void> {
     this.logger.log(`Exchanging OAuth code for token for profile ${profileId}`);
-    
+
     // 1. Troca o 'code' temporário pela Access Token de longa duração
     const accessToken = await this.instagram.exchangeCodeForToken(code);
-    
+
+    this.logger.log(`Access Token: ${accessToken}`);
+
     // 2. Busca o @username e ID do Instagram da pessoa logada
     const { igUserId, username } = await this.instagram.getIgProfileInfo(accessToken);
 
@@ -52,7 +54,7 @@ export class RaioXService {
     // 1. Fetch Instagram Posts
     this.logger.log('Fetching Instagram Posts...');
     const posts = await this.instagram.fetchUserPosts(igUserId, token, 10);
-    
+
     // 2. Save Posts to DB
     for (const post of posts) {
       const { error } = await sbClient.from('post_metrics').upsert({
@@ -85,9 +87,9 @@ export class RaioXService {
       psychological_profile: persona.psychological_profile,
       visual_preferences: persona.visual_preferences,
     });
-    
+
     if (personaError) {
-       this.logger.error('Failed to insert Persona:', personaError.message);
+      this.logger.error('Failed to insert Persona:', personaError.message);
     }
 
     // 5. Update Connection Status
