@@ -59,7 +59,7 @@ export class InstagramService {
     const state = Buffer.from(JSON.stringify({ profileId })).toString('base64');
 
     // Scopes obrigatórios para a Graph API (Instagram Business/Creator)
-    const scope = 'pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights';
+    const scope = 'business_management,pages_show_list,pages_read_engagement,instagram_basic,instagram_manage_insights';
 
     return `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}&state=${state}`;
   }
