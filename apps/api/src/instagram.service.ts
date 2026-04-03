@@ -9,6 +9,12 @@ export interface CarouselChild {
   media_url: string;
 }
 
+interface CreatorDiscoveryOptions {
+  postsPerHashtag?: number;
+  topCreatorsPerCountry?: number;
+  category?: 'lifestyle' | 'marketing' | 'tech'; // Exemplo de nicho
+}
+
 export interface InstagramPost {
   id: string;
   media_type: 'IMAGE' | 'VIDEO' | 'CAROUSEL_ALBUM';
@@ -86,85 +92,93 @@ export class InstagramService {
    * Strategy: scrape trending hashtags per country → collect unique post authors
    * → rank by viralization factor (views + likes / followers) → return top N.
    */
-  async discoverTopCreators(options: {
-    postsPerHashtag?: number;
-    topCreatorsPerCountry?: number;
-    minFollowers?: number;
-  } = {}): Promise<string[]> {
-    if (!this.apifyClient) {
-      this.logger.warn('Apify not configured. Cannot auto-discover creators.');
+
+
+  async discoverTopCreators(options: CreatorDiscoveryOptions = {}): Promise<{ username: string; country: string; score: number }[]> {
+    // Capture locally so TypeScript keeps the non-null narrowing inside async callbacks
+    const client = this.apifyClient;
+    if (!client) {
+      this.logger.warn('Apify not configured.');
       return [];
     }
 
-    const {
-      postsPerHashtag = 30,
-      topCreatorsPerCountry = 3,
-      minFollowers = 100_000,
-    } = options;
+    const { postsPerHashtag = 30, topCreatorsPerCountry = 3 } = options;
 
-    // Representative hashtags for each country/region
+    // Hashtags por país/nicho — escolhidas para atrair criadores profissionais, não ruído
     const countryHashtags: Record<string, string[]> = {
-      BR: ['viral', 'viralizou', 'trending', 'contentcreator', 'criadordecaucun'],
-      US: ['viral', 'trending', 'fyp', 'contentcreator', 'viralvideo'],
-      IN: ['viralpost', 'trending', 'reels', 'contentcreatorindia'],
-      DE: ['viral', 'trending', 'contentcreator', 'deutschland'],
-      MX: ['viral', 'trending', 'creadordecontenido', 'mexico'],
+      BR: ['empreendedorismo', 'marketingdigital'],
+      US: ['contentstrategy', 'digitalmarketing'],
+      IN: ['instagramgrowth', 'contentcreatorindia'],
+      DE: ['onlinemarketing', 'contentcreator'],
+      MX: ['marketingdigital', 'creadordecontenido'],
     };
 
-    const creatorScores: Map<string, { score: number; followers: number }> = new Map();
+    const creatorScores = new Map<string, { score: number; country: string; appearances: number }>();
 
-    for (const [country, hashtags] of Object.entries(countryHashtags)) {
-      this.logger.log(`🔍 Discovering creators in ${country}...`);
+    // Processamento paralelo por país para ganhar performance
+    await Promise.all(Object.entries(countryHashtags).map(async ([country, hashtags]) => {
+      const hashtag = hashtags[0];
 
-      for (const hashtag of hashtags.slice(0, 2)) { // 2 hashtags per country to limit costs
-        try {
-          const run = await this.apifyClient.actor('apify/instagram-hashtag-scraper').call({
-            hashtags: [hashtag],
-            resultsLimit: postsPerHashtag,
-          });
+      try {
+        this.logger.log(`🔍 Scraping #${hashtag} for ${country}...`);
 
-          const { items } = await this.apifyClient.dataset(run.defaultDatasetId).listItems();
+        const run = await client.actor('apify/instagram-hashtag-scraper').call({
+          hashtags: [hashtag],
+          resultsLimit: postsPerHashtag,
+        });
 
-          for (const post of items as any[]) {
-            const ownerUsername: string = post.ownerUsername || post.owner?.username;
-            if (!ownerUsername) continue;
+        const { items } = await client.dataset(run.defaultDatasetId).listItems();
 
-            const followers: number = post.ownerFollowersCount || post.owner?.followersCount || 0;
-            if (followers < minFollowers) continue; // Filter out small accounts
-
-            const likes: number = post.likesCount || 0;
-            const views: number = post.videoViewCount || post.viewCount || 0;
-            const comments: number = post.commentsCount || 0;
-
-            // Viralization score: engagement relative to follower count
-            const engagementScore = followers > 0
-              ? ((likes + comments + views * 0.3) / followers) * 100
-              : 0;
-
-            const existing = creatorScores.get(ownerUsername);
-            if (!existing || engagementScore > existing.score) {
-              creatorScores.set(ownerUsername, { score: engagementScore, followers });
-            }
-          }
-
-          this.logger.log(`  ✅ Hashtag #${hashtag} (${country}): ${items.length} posts scanned.`);
-        } catch (err: any) {
-          this.logger.error(`  ❌ Failed scraping hashtag #${hashtag} (${country}): ${err.message}`);
+        if (items.length > 0) {
+          this.logger.debug(`Sample fields from #${hashtag}: ${Object.keys(items[0] as object).slice(0, 10).join(', ')}`);
         }
+
+        for (const post of (items as any[])) {
+          const username: string | undefined =
+            post.ownerUsername || post.username || post.owner?.username || post.authorUsername;
+          if (!username) continue;
+
+          const likes: number = post.likesCount ?? post.likes_count ?? 0;
+          const comments: number = post.commentsCount ?? post.comments_count ?? 0;
+          const views: number = post.videoViewCount ?? post.video_view_count ?? post.viewCount ?? 0;
+
+          // Fórmula de Engagement Power: Comentários valem muito mais (sinal de intenção)
+          const engagementScore = (likes * 1) + (comments * 5) + (views * 0.1);
+
+          const existing = creatorScores.get(username);
+          if (!existing) {
+            creatorScores.set(username, { score: engagementScore, country, appearances: 1 });
+          } else {
+            // Consistência = criador aparece em múltiplos posts. Soma o score.
+            creatorScores.set(username, {
+              score: existing.score + engagementScore,
+              country: existing.country,
+              appearances: existing.appearances + 1,
+            });
+          }
+        }
+
+        this.logger.log(`  ✅ #${hashtag} (${country}): ${items.length} posts, ${creatorScores.size} creators found so far.`);
+      } catch (err: unknown) {
+        this.logger.error(`❌ Error scraping #${hashtag} (${country}): ${err instanceof Error ? err.message : String(err)}`);
       }
-    }
+    }));
 
-    // Sort all discovered creators by score, take top N per country representation
-    const sorted = [...creatorScores.entries()]
-      .sort((a, b) => b[1].score - a[1].score)
-      .slice(0, topCreatorsPerCountry * Object.keys(countryHashtags).length);
+    this.logger.log(`🏆 Total unique creators found: ${creatorScores.size}`);
 
-    const topUsernames = sorted.map(([username]) => username);
-
-    this.logger.log(`🏆 Discovered ${topUsernames.length} top viral creators: ${topUsernames.join(', ')}`);
-    return topUsernames;
+    // Ranking final por país com boost de consistência
+    return Object.keys(countryHashtags).flatMap(country =>
+      Array.from(creatorScores.entries())
+        .filter(([, data]) => data.country === country)
+        .map(([username, data]) => ({
+          username,
+          country,
+          score: Math.round(data.score * (1 + data.appearances * 0.2)),
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, topCreatorsPerCountry)
+    );
   }
-
   /**
    * Fetches user posts with pagination support.
    * Instagram Graph API returns max 25 per page, so we paginate to get up to `limit`.
