@@ -24,6 +24,14 @@ export class RaioXController {
     );
   }
 
+  @Post('benchmark-global')
+  @HttpCode(202)
+  async runGlobalBenchmark() {
+    // Fire and forget returning 202
+    this.raioXService.runGlobalBenchmark().catch(console.error);
+    return { status: 'STARTED', message: 'Global Benchmark Started in background.' };
+  }
+
   @Get('accounts')
   async getAvailableAccounts(@Query('token') token: string) {
     if (!token) throw new Error('Token is required');

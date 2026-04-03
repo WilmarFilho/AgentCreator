@@ -541,4 +541,119 @@ export class RaioXService {
 
     await Promise.all(executing);
   }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // GLOBAL BENCHMARK 
+  // ═══════════════════════════════════════════════════════════════════════
+
+  public async runGlobalBenchmark() {
+    this.logger.log(`🌍 Starting Global Benchmark — Auto-discovering viral creators via Apify...`);
+
+    // Step 1: Auto-discover top viral creators across 5 countries via hashtag scraping
+    const FALLBACK_CREATORS = ['mrbeast', 'virginia', 'thiagofinch', 'virat.kohli', 'tonikroos'];
+    let creators: string[] = [];
+
+    try {
+      creators = await this.instagram.discoverTopCreators({
+        postsPerHashtag: 30,
+        topCreatorsPerCountry: 3,
+        minFollowers: 100_000,
+      });
+    } catch (err: any) {
+      this.logger.error('Failed to auto-discover creators, using fallback list.', err.message);
+    }
+
+    if (!creators || creators.length === 0) {
+      this.logger.warn('⚠️ No creators discovered. Using fallback seed list.');
+      creators = FALLBACK_CREATORS;
+    }
+
+    this.logger.log(`📋 Processing ${creators.length} creators: ${creators.join(', ')}`);
+
+    const sbClient = this.supabase.getClient();
+
+    for (const handle of creators) {
+        this.logger.log(`⏳ Benchmarking @${handle}...`);
+        
+        try {
+            // Upsert a benchmark profile (system-level, no real user)
+            const { data: profileData, error: profileErr } = await sbClient.from('profiles').upsert({
+                ig_username: handle,
+                name: `Benchmark: ${handle}`,
+                system_user_id: null
+            }, { onConflict: 'ig_username' }).select('*').maybeSingle();
+
+            if (profileErr) {
+               this.logger.warn(`Could not upsert profile for ${handle}: ${profileErr.message}. Skipping...`);
+               continue;
+            }
+
+            const profileId = profileData?.id;
+            if (!profileId) continue;
+
+            await this.cleanupPreviousAnalysis(profileId);
+
+            // Step 2: Fetch real post data for this creator via Apify
+            this.logger.log(`🕵️ Fetching posts via Apify for @${handle}...`);
+            const apifyData = await this.instagram.fetchApifyData(handle, 20);
+
+            if (!apifyData?.rawItems?.length) {
+                this.logger.warn(`No Apify data for @${handle}. Skipping...`);
+                continue;
+            }
+
+            const followerCount = apifyData.followers || 1;
+            const posts: InstagramPost[] = apifyData.rawItems.map((item: any) => ({
+                id: item.id || Math.random().toString(36).substring(7),
+                caption: item.caption || '',
+                media_type: item.type === 'Video' ? 'VIDEO' : item.type === 'Sidecar' ? 'CAROUSEL_ALBUM' : 'IMAGE',
+                media_url: item.displayUrl || item.imageUrl || item.videoUrl,
+                timestamp: item.timestamp || new Date().toISOString(),
+                like_count: item.likesCount || 0,
+                comments_count: item.commentsCount || 0,
+                view_count: item.videoViewCount || item.viewCount || 0,
+                children: []
+            }));
+
+            // Step 3: Filter only viral posts (top 30% by viralization factor)
+            const viralThreshold = followerCount * 0.05; // 5% of followers = viral
+            const viralPosts = posts.filter(p =>
+              (p.view_count || 0) >= viralThreshold || (p.like_count || 0) >= followerCount * 0.02
+            );
+            const postsToAnalyze = viralPosts.length > 0 ? viralPosts : posts; // fallback: all posts
+
+            this.logger.log(`📊 @${handle}: ${posts.length} posts total, ${viralPosts.length} viral. Analyzing ${postsToAnalyze.length}...`);
+
+            // Step 4: Build deep content payload from viral captions
+            const deepContent: DeepContentPayload = {
+              captions: postsToAnalyze.map(p => p.caption).filter(Boolean),
+              imageAnalyses: [],
+              videoTranscriptions: [],
+              metricsContext: `O criador @${handle} tem ${followerCount.toLocaleString()} seguidores. ` +
+                `De ${posts.length} posts analisados, ${viralPosts.length} viralizaram significativamente.`
+            };
+
+            // Step 5: Analyze persona with LLM (or fine-tuned model if configured)
+            const personaResult = await this.openai.analyzePersonaDeep(deepContent);
+
+            await sbClient.from('brand_personas').insert({
+                profile_id: profileId,
+                content_niche: personaResult.nicho_principal || 'N/A',
+                subnichos: personaResult.subnichos || [],
+                pontos_fortes: personaResult.pontos_fortes || [],
+                pontos_fracos: personaResult.pontos_fracos || [],
+                fator_viralizacao: personaResult.fator_viralizacao || 0,
+                psychological_profile: personaResult.resumo_psicologico || '',
+                publico_alvo: personaResult.publico_alvo || '',
+                tone_of_voice: personaResult.posicionamento || ''
+            });
+
+            this.logger.log(`✅ Benchmark completed for @${handle}.`);
+        } catch (e: any) {
+             this.logger.error(`❌ Error benchmarking @${handle}`, e.message);
+        }
+    }
+
+    this.logger.log('🎉 Global Benchmark completed! Dataset ready for JSONL export.');
+  }
 }

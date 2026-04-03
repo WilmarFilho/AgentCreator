@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import { ApifyClient } from 'apify-client';
 
 export interface CarouselChild {
   id: string;
@@ -14,14 +16,154 @@ export interface InstagramPost {
   timestamp: string;
   media_url?: string;
   children?: CarouselChild[];
+  like_count?: number;
+  comments_count?: number;
+  view_count?: number; // Fetched via Apify or Insights
 }
 
 @Injectable()
 export class InstagramService {
   private readonly logger = new Logger(InstagramService.name);
   private readonly baseUrl = 'https://graph.facebook.com/v19.0';
+  private apifyClient: ApifyClient | null = null;
 
-  constructor() { }
+  constructor(private configService: ConfigService) {
+    const apifyToken = this.configService.get<string>('APIFY_API_TOKEN');
+    if (apifyToken) {
+      this.apifyClient = new ApifyClient({ token: apifyToken });
+      this.logger.log('Apify Client initialized explicitly.');
+    } else {
+      this.logger.warn('APIFY_API_TOKEN not found. Scraper functionality will be disabled or mocked.');
+    }
+  }
+
+  /**
+   * Fetches the user profile and their posts from Apify to get real followers and view counts.
+   */
+  async fetchApifyData(username: string, limit: number = 15): Promise<{ followers: number; postMetrics: Record<string, any>; rawItems?: any[] }> {
+    if (!this.apifyClient) {
+      return { followers: 0, postMetrics: {} };
+    }
+
+    this.logger.log(`Starting Apify scrape for username: ${username}`);
+    try {
+      const run = await this.apifyClient.actor('apify/instagram-scraper').call({
+        directUrls: [`https://www.instagram.com/${username}/`],
+        resultsType: 'details',
+        resultsLimit: limit,
+      });
+
+      const { items } = await this.apifyClient.dataset(run.defaultDatasetId).listItems();
+
+      let followers = 0;
+      const postMetrics: Record<string, any> = {};
+
+      for (const item of items as any[]) {
+        if (item.followersCount) {
+          followers = item.followersCount;
+        }
+        if (item.id) {
+          postMetrics[String(item.id)] = {
+            viewCount: item.videoViewCount || item.viewCount || 0,
+            likeCount: item.likesCount || 0,
+            commentsCount: item.commentsCount || 0,
+          };
+        }
+      }
+
+      this.logger.log(`Apify scrape finished. Followers: ${followers}, Posts Scraped: ${Object.keys(postMetrics).length}`);
+      return { followers, postMetrics, rawItems: items };
+    } catch (error: any) {
+      this.logger.error(`Apify fetch failed for ${username}`, error.message);
+      return { followers: 0, postMetrics: {} };
+    }
+  }
+
+  /**
+   * Uses Apify Instagram Hashtag Scraper to discover top viral creators
+   * across multiple countries/languages, ranked by engagement.
+   *
+   * Strategy: scrape trending hashtags per country → collect unique post authors
+   * → rank by viralization factor (views + likes / followers) → return top N.
+   */
+  async discoverTopCreators(options: {
+    postsPerHashtag?: number;
+    topCreatorsPerCountry?: number;
+    minFollowers?: number;
+  } = {}): Promise<string[]> {
+    if (!this.apifyClient) {
+      this.logger.warn('Apify not configured. Cannot auto-discover creators.');
+      return [];
+    }
+
+    const {
+      postsPerHashtag = 30,
+      topCreatorsPerCountry = 3,
+      minFollowers = 100_000,
+    } = options;
+
+    // Representative hashtags for each country/region
+    const countryHashtags: Record<string, string[]> = {
+      BR: ['viral', 'viralizou', 'trending', 'contentcreator', 'criadordecaucun'],
+      US: ['viral', 'trending', 'fyp', 'contentcreator', 'viralvideo'],
+      IN: ['viralpost', 'trending', 'reels', 'contentcreatorindia'],
+      DE: ['viral', 'trending', 'contentcreator', 'deutschland'],
+      MX: ['viral', 'trending', 'creadordecontenido', 'mexico'],
+    };
+
+    const creatorScores: Map<string, { score: number; followers: number }> = new Map();
+
+    for (const [country, hashtags] of Object.entries(countryHashtags)) {
+      this.logger.log(`🔍 Discovering creators in ${country}...`);
+
+      for (const hashtag of hashtags.slice(0, 2)) { // 2 hashtags per country to limit costs
+        try {
+          const run = await this.apifyClient.actor('apify/instagram-hashtag-scraper').call({
+            hashtags: [hashtag],
+            resultsLimit: postsPerHashtag,
+          });
+
+          const { items } = await this.apifyClient.dataset(run.defaultDatasetId).listItems();
+
+          for (const post of items as any[]) {
+            const ownerUsername: string = post.ownerUsername || post.owner?.username;
+            if (!ownerUsername) continue;
+
+            const followers: number = post.ownerFollowersCount || post.owner?.followersCount || 0;
+            if (followers < minFollowers) continue; // Filter out small accounts
+
+            const likes: number = post.likesCount || 0;
+            const views: number = post.videoViewCount || post.viewCount || 0;
+            const comments: number = post.commentsCount || 0;
+
+            // Viralization score: engagement relative to follower count
+            const engagementScore = followers > 0
+              ? ((likes + comments + views * 0.3) / followers) * 100
+              : 0;
+
+            const existing = creatorScores.get(ownerUsername);
+            if (!existing || engagementScore > existing.score) {
+              creatorScores.set(ownerUsername, { score: engagementScore, followers });
+            }
+          }
+
+          this.logger.log(`  ✅ Hashtag #${hashtag} (${country}): ${items.length} posts scanned.`);
+        } catch (err: any) {
+          this.logger.error(`  ❌ Failed scraping hashtag #${hashtag} (${country}): ${err.message}`);
+        }
+      }
+    }
+
+    // Sort all discovered creators by score, take top N per country representation
+    const sorted = [...creatorScores.entries()]
+      .sort((a, b) => b[1].score - a[1].score)
+      .slice(0, topCreatorsPerCountry * Object.keys(countryHashtags).length);
+
+    const topUsernames = sorted.map(([username]) => username);
+
+    this.logger.log(`🏆 Discovered ${topUsernames.length} top viral creators: ${topUsernames.join(', ')}`);
+    return topUsernames;
+  }
 
   /**
    * Fetches user posts with pagination support.
@@ -37,7 +179,7 @@ export class InstagramService {
       while (url && allPosts.length < limit) {
         const response: any = await axios.get(url, {
           params: {
-            fields: 'id,caption,media_type,media_url,timestamp',
+            fields: 'id,caption,media_type,media_url,timestamp,like_count,comments_count',
             access_token: accessToken,
             limit: perPage,
           },
@@ -53,6 +195,11 @@ export class InstagramService {
           caption: post.caption || '',
           timestamp: post.timestamp,
           media_url: post.media_url || undefined,
+          like_count: post.like_count || 0,
+          comments_count: post.comments_count || 0,
+          // Se o post for video, a Graph API oficial não retorna view_count no endpoint básico.
+          // Deixamos como 0 para ser preenchido pela integração com APIFY no Raio-X.
+          view_count: 0,
         }));
 
         allPosts.push(...posts);
@@ -69,6 +216,26 @@ export class InstagramService {
     } catch (error: any) {
       this.logger.error('Failed to fetch Instagram posts', error.response?.data || error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Fetches profile metrics, specifically follower count for Viralization Factor
+   */
+  async getProfileFollowerCount(igUserId: string, accessToken: string): Promise<number> {
+    this.logger.debug(`Fetching profile metrics for IG User ${igUserId}`);
+    try {
+      // TODO: Apify Integration - fallback if official API doesn't allow parsing followers for standard user. Graph API usually returns followers_count for business profiles.
+      const response = await axios.get(`${this.baseUrl}/${igUserId}`, {
+        params: {
+          fields: 'followers_count',
+          access_token: accessToken,
+        },
+      });
+      return response.data.followers_count || 1; // Return 1 to avoid division by zero
+    } catch (error: any) {
+      this.logger.warn(`Could not fetch followers_count officially. Relying on default or Apify Mock. Err: ${error.message}`);
+      return 0; // Mocked fallback
     }
   }
 

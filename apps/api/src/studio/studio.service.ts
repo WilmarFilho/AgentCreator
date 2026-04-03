@@ -41,11 +41,14 @@ export class StudioService {
 
     // 3. Request OpenAI to generate new trends
     const newTrends = await this.openai.generateTrends({
-        primary_goal: persona.primary_goal,
-        content_niche: persona.content_niche,
-        tone_of_voice: persona.tone_of_voice,
-        psychological_profile: persona.psychological_profile,
-        visual_preferences: persona.visual_preferences || {}
+        nicho_principal: persona.content_niche,
+        subnichos: persona.subnichos || [],
+        pontos_fortes: persona.pontos_fortes || [],
+        pontos_fracos: persona.pontos_fracos || [],
+        fator_viralizacao: persona.fator_viralizacao || 0,
+        publico_alvo: persona.publico_alvo || 'Público geral',
+        posicionamento: persona.posicionamento || persona.tone_of_voice || '',
+        resumo_psicologico: persona.resumo_psicologico || persona.psychological_profile || '',
     });
 
     if (newTrends.length === 0) {

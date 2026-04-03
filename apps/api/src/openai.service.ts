@@ -3,17 +3,27 @@ import OpenAI from 'openai';
 import { toFile } from 'openai';
 
 export interface PersonaResult {
-  primary_goal: 'sales' | 'authority' | 'growth';
-  content_niche: string;
-  tone_of_voice: string;
-  psychological_profile: string;
-  visual_preferences: Record<string, string>;
+  nicho_principal: string;
+  subnichos: string[];
+  pontos_fortes: string[];
+  pontos_fracos: string[];
+  fator_viralizacao: number;
+  resumo_psicologico: string;
+  publico_alvo: string;
+  posicionamento: string;
+  // Fallbacks for legacy backwards compatibility
+  primary_goal?: string;
+  content_niche?: string;
+  tone_of_voice?: string;
+  psychological_profile?: string;
+  visual_preferences?: Record<string, string>;
 }
 
 export interface DeepContentPayload {
   captions: string[];
   imageAnalyses: string[];
   videoTranscriptions: string[];
+  metricsContext?: string;
 }
 
 @Injectable()
@@ -193,42 +203,35 @@ Responda em Português Brasileiro de forma estruturada e concisa (máximo 300 pa
     this.logger.debug(`Persona analysis content size: ${fullContent.length} chars (~${Math.ceil(fullContent.length / 4)} tokens)`);
 
     try {
+      const modelToUse = process.env.FINE_TUNED_MODEL_ID || 'gpt-4o';
+      if (process.env.FINE_TUNED_MODEL_ID) {
+        this.logger.log(`🧠 USING CUSTOM FINE-TUNED LLM: ${process.env.FINE_TUNED_MODEL_ID}`);
+      }
+
       const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: modelToUse,
         messages: [
           {
             role: 'system',
             content: `Você é um estrategista de marketing digital de elite, especialista em branding pessoal e análise comportamental de criadores de conteúdo.
+Você receberá uma amostra representativa do conteúdo de um perfil do Instagram, incluindo legendas, análises visuais e transcrições.
+Com base em TUDO isso, defina a Brand Persona completa.
 
-Você receberá uma amostra representativa do conteúdo de um perfil do Instagram, incluindo:
-- Legendas dos posts
-- Análises visuais das imagens (feitas por IA)
-- Transcrições de vídeos/reels
-
-Com base em TUDO isso, defina a Brand Persona desse criador de conteúdo.
-
-IMPORTANTE: Todos os valores no JSON devem ser escritos em Português Brasileiro (pt-BR), exceto as chaves JSON que devem permanecer em inglês.
-
-Sua análise deve ser PROFUNDA e DETALHADA. Não seja genérico. Use exemplos específicos do conteúdo analisado para justificar cada aspecto da persona.
-
-Responda APENAS com um JSON válido seguindo esta estrutura:
+Responda APENAS com um JSON válido seguindo estritamente esta estrutura:
 {
-  "primary_goal": "sales" | "authority" | "growth",
-  "content_niche": "descrição detalhada do nicho e sub-nichos (pt-BR, mínimo 100 palavras)",
-  "tone_of_voice": "descrição rica do tom de voz com exemplos de padrões linguísticos encontrados (pt-BR, mínimo 100 palavras)",
-  "psychological_profile": "perfil psicológico profundo da marca/criador, incluindo arquétipos, valores centrais, gatilhos emocionais usados, e padrão de comunicação (pt-BR, mínimo 150 palavras)",
-  "visual_preferences": {
-    "colors": "paleta de cores dominante identificada nos posts (pt-BR)",
-    "style": "estilo visual predominante com detalhes (pt-BR)",
-    "photo_quality": "nível de qualidade e consistência visual (pt-BR)",
-    "content_formats": "formatos mais usados e preferidos (pt-BR)",
-    "visual_identity_score": "nota de 1 a 10 para consistência da identidade visual"
-  }
+  "nicho_principal": "Nicho principal percebido (ex: Finanças, Comédia)",
+  "subnichos": ["Subnicho 1", "Subnicho 2"],
+  "pontos_fortes": ["Ponto forte 1", "Ponto forte 2"],
+  "pontos_fracos": ["Ponto fraco 1", "Ponto fraco 2"],
+  "fator_viralizacao": 0.0, // Deve basear-se no contexto de engajamento do prompt numérico
+  "resumo_psicologico": "Perfil psicológico profundo (arquétipos, ganchos emocionais)",
+  "publico_alvo": "Descrição da persona que mais consome este conteúdo",
+  "posicionamento": "Tom da voz (Motivacional, Irônico, Didático)"
 }`,
           },
           {
             role: 'user',
-            content: `Analise o seguinte conteúdo do perfil:\n\n${fullContent}`,
+            content: `Engajamento do Perfil:\n${content.metricsContext || 'Sem dados numéricos'}\n\nAnalise o seguinte conteúdo do perfil:\n\n${fullContent}`,
           },
         ],
         response_format: { type: 'json_object' },

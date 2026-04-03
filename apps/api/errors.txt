@@ -1,0 +1,7 @@
+src/openai.service.ts(290,79): error TS2339: Property 'content_niche' does not exist on type 'PersonaResult'.
+src/openai.service.ts(311,58): error TS2339: Property 'content_niche' does not exist on type 'PersonaResult'.
+src/openai.service.ts(311,90): error TS2339: Property 'primary_goal' does not exist on type 'PersonaResult'.
+src/openai.service.ts(311,121): error TS2339: Property 'tone_of_voice' does not exist on type 'PersonaResult'.
+src/openai.service.ts(353,78): error TS2339: Property 'content_niche' does not exist on type 'PersonaResult'.
+src/openai.service.ts(353,110): error TS2339: Property 'tone_of_voice' does not exist on type 'PersonaResult'.
+src/studio/studio.service.ts(44,9): error TS2353: Object literal may only specify known properties, and 'primary_goal' does not exist in type 'PersonaResult'.

@@ -1,0 +1,2 @@
+src/instagram.service.ts(63,11): error TS2322: Type '{}' is not assignable to type 'number'.
+src/instagram.service.ts(66,23): error TS2538: Type '{}' cannot be used as an index type.
