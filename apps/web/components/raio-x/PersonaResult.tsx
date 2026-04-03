@@ -1,6 +1,7 @@
 import {
   Target, MessageSquare, Palette, UserCircle2, ArrowRight,
-  Crosshair, Eye, Camera, LayoutGrid, Star, Sparkles, BookOpen
+  Crosshair, Eye, Camera, LayoutGrid, Star, Sparkles, BookOpen, Brain,
+  TrendingUp, Users, CheckCircle2, AlertCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -59,90 +60,156 @@ function VisualPreferencesCard({ prefs }: { prefs: any }) {
   );
 }
 
+
+
 export default function PersonaResult({ persona }: { persona: any }) {
-  const goal = goalLabels[persona.primary_goal] || goalLabels.authority;
+  // Formatação do fator de viralização (0-10)
+  const viralScore = (persona.fator_viralizacao || 0).toFixed(1);
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
-      {/* Header */}
-      <div className="flex items-center gap-4 mb-8 border-b border-white/5 pb-6">
-        <div className="w-16 h-16 bg-green-500/10 text-green-400 rounded-full flex items-center justify-center shrink-0">
-          <UserCircle2 size={32} />
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-1000 space-y-8">
+
+      {/* HEADER COM GRADIENTE NEON */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-white/10 pb-8">
+        <div className="flex items-center gap-5">
+          <div className="relative">
+            <div className="absolute -inset-1 bg-gradient-to-r from-cyan-500 to-violet-600 rounded-full blur opacity-40 animate-pulse"></div>
+            <div className="relative w-20 h-20 bg-zinc-950 border border-white/10 text-cyan-400 rounded-full flex items-center justify-center shrink-0">
+              <UserCircle2 size={40} />
+            </div>
+          </div>
+          <div>
+            <h2 className="text-4xl font-black text-white tracking-tighter">
+              Brand <span className="bg-gradient-to-r from-cyan-400 to-violet-500 bg-clip-text text-transparent">Persona</span>
+            </h2>
+            <p className="text-slate-400 font-medium flex items-center gap-2">
+              <Sparkles size={16} className="text-violet-400" />
+              Análise estratégica de elite concluída
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-3xl font-extrabold text-white tracking-tight">Persona Definida!</h2>
-          <p className="text-green-400/90 font-medium">Análise profunda concluída com sucesso</p>
+
+        {/* MÉTRICA DE VIRALIZAÇÃO */}
+        <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-4 rounded-3xl flex items-center gap-4 min-w-[200px]">
+          <div className="p-3 bg-cyan-500/10 text-cyan-400 rounded-2xl">
+            <TrendingUp size={24} />
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Viral Factor</p>
+            <p className="text-2xl font-black text-white">{viralScore}<span className="text-sm text-slate-500">/10</span></p>
+          </div>
         </div>
       </div>
 
-      <div className="space-y-5">
-        {/* Row 1: Goal + Niche */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {/* Primary Goal */}
-          <div className="bg-zinc-950/40 p-6 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-            <div className="flex items-center gap-3 mb-4 text-brand">
-              <Target size={22} />
-              <h3 className="text-base font-bold">Objetivo Principal</h3>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* COLUNA DA ESQUERDA: IDENTIDADE CORE */}
+        <div className="lg:col-span-1 space-y-6">
+          {/* Posicionamento */}
+          <div className="group bg-zinc-900/40 backdrop-blur-md p-6 rounded-3xl border border-white/5 hover:border-cyan-500/30 transition-all duration-500">
+            <div className="flex items-center gap-3 mb-4 text-cyan-400">
+              <Target size={20} />
+              <h3 className="text-sm font-bold uppercase tracking-wider">Posicionamento</h3>
             </div>
-            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border ${goal.color} mb-3`}>
-              <Crosshair size={16} />
-              <span className="text-lg font-extrabold capitalize">{goal.label}</span>
-            </div>
-            <p className="text-slate-500 text-sm">{goal.description}</p>
+            <p className="text-2xl font-extrabold text-white leading-tight">
+              {persona.posicionamento}
+            </p>
           </div>
 
-          {/* Content Niche */}
-          <div className="bg-zinc-950/40 p-6 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+          {/* Nicho e Subnichos */}
+          <div className="bg-zinc-900/40 backdrop-blur-md p-6 rounded-3xl border border-white/5">
+            <div className="flex items-center gap-3 mb-4 text-violet-400">
+              <BookOpen size={20} />
+              <h3 className="text-sm font-bold uppercase tracking-wider">Nicho Principal</h3>
+            </div>
+            <p className="text-lg font-bold text-slate-200 mb-4">{persona.nicho_principal}</p>
+            <div className="flex flex-wrap gap-2">
+              {persona.subnichos?.map((sub: string) => (
+                <span key={sub} className="px-3 py-1 bg-white/5 border border-white/10 rounded-full text-xs font-medium text-slate-400">
+                  {sub}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Público Alvo */}
+          <div className="bg-zinc-900/40 backdrop-blur-md p-6 rounded-3xl border border-white/5">
             <div className="flex items-center gap-3 mb-4 text-emerald-400">
-              <BookOpen size={22} />
-              <h3 className="text-base font-bold">Nicho de Conteúdo</h3>
+              <Users size={20} />
+              <h3 className="text-sm font-bold uppercase tracking-wider">Público Alvo</h3>
             </div>
-            <p className="text-slate-300 text-sm leading-relaxed">{persona.content_niche}</p>
+            <p className="text-slate-300 text-sm leading-relaxed">{persona.publico_alvo}</p>
           </div>
         </div>
 
-        {/* Row 2: Tone of Voice */}
-        <div className="bg-zinc-950/40 p-6 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-          <div className="flex items-center gap-3 mb-4 text-blue-400">
-            <MessageSquare size={22} />
-            <h3 className="text-base font-bold">Tom de Voz</h3>
-          </div>
-          <div className="border-l-2 border-blue-500/30 pl-4">
-            <p className="text-slate-300 leading-relaxed text-sm italic">{persona.tone_of_voice}</p>
-          </div>
-        </div>
+        {/* COLUNA DA DIREITA: ANÁLISE PROFUNDA */}
+        <div className="lg:col-span-2 space-y-6">
 
-        {/* Row 3: Psychological Profile */}
-        <div className="bg-zinc-950/40 p-6 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-          <div className="flex items-center gap-3 mb-4 text-amber-400">
-            <UserCircle2 size={22} />
-            <h3 className="text-base font-bold">Perfil Psicológico da Marca</h3>
-          </div>
-          <p className="text-slate-300 leading-relaxed text-sm">{persona.psychological_profile}</p>
-        </div>
-
-        {/* Row 4: Visual Preferences - structured */}
-        {persona.visual_preferences && (
-          <div className="bg-zinc-950/40 p-6 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
-            <div className="flex items-center gap-3 mb-5 text-fuchsia-400">
-              <Palette size={22} />
-              <h3 className="text-base font-bold">Preferências Visuais</h3>
+          {/* Resumo Psicológico - O Card Principal */}
+          <div className="relative overflow-hidden bg-zinc-900/60 backdrop-blur-md p-8 rounded-3xl border border-white/10 shadow-2xl">
+            <div className="absolute top-0 right-0 p-8 opacity-5">
+              <Brain size={120} />
             </div>
-            <VisualPreferencesCard prefs={persona.visual_preferences} />
+            <div className="flex items-center gap-3 mb-6 text-amber-400">
+              <Brain size={24} />
+              <h3 className="text-xl font-black">Perfil Psicológico & Estratégia</h3>
+            </div>
+            <p className="text-slate-300 leading-relaxed text-lg font-medium whitespace-pre-wrap">
+              {persona.resumo_psicologico}
+            </p>
           </div>
-        )}
+
+          {/* Grid de Pontos Fortes e Fracos */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Pontos Fortes */}
+            <div className="bg-emerald-500/5 p-6 rounded-3xl border border-emerald-500/10">
+              <div className="flex items-center gap-3 mb-4 text-emerald-400 font-bold uppercase text-xs tracking-widest">
+                <CheckCircle2 size={18} />
+                Vantagens Competitivas
+              </div>
+              <ul className="space-y-3">
+                {persona.pontos_fortes?.map((p: string, i: number) => (
+                  <li key={i} className="text-sm text-slate-300 flex items-start gap-2">
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full mt-1.5 shrink-0" />
+                    {p}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Pontos Fracos */}
+            <div className="bg-rose-500/5 p-6 rounded-3xl border border-rose-500/10">
+              <div className="flex items-center gap-3 mb-4 text-rose-400 font-bold uppercase text-xs tracking-widest">
+                <AlertCircle size={18} />
+                Gaps de Retenção
+              </div>
+              <ul className="space-y-3">
+                {persona.pontos_fracos?.map((p: string, i: number) => (
+                  <li key={i} className="text-sm text-slate-300 flex items-start gap-2">
+                    <span className="w-1.5 h-1.5 bg-rose-500 rounded-full mt-1.5 shrink-0" />
+                    {p}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* CTA */}
-      <div className="flex justify-end pt-6 mt-6 border-t border-white/5">
+      {/* CTA FOOTER */}
+      <div className="flex items-center justify-between pt-10 border-t border-white/5">
+        <div className="hidden md:block">
+          <p className="text-slate-500 text-sm">Pronto para transformar essa estratégia em posts reais?</p>
+        </div>
         <Link
           href="/dashboard/studio"
-          className="flex items-center gap-2 bg-slate-50 text-zinc-950 font-bold tracking-tight py-3.5 px-6 rounded-2xl hover:bg-slate-200 transition-colors active:scale-95"
+          className="group relative flex items-center gap-3 bg-white text-zinc-950 font-black tracking-tight py-4 px-10 rounded-2xl transition-all hover:scale-[1.02] active:scale-95 shadow-[0_0_20px_rgba(255,255,255,0.1)] hover:shadow-cyan-500/20"
         >
           <span>Avançar para Fábrica</span>
-          <ArrowRight size={18} />
+          <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
         </Link>
       </div>
     </div>
   );
+
 }
