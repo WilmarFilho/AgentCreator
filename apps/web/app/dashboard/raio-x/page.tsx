@@ -40,7 +40,7 @@ const PostCard = ({ post }: { post: any }) => {
               muted
               playsInline
               preload="metadata"
-              onMouseEnter={(e) => (e.target as HTMLVideoElement).play().catch(() => {})}
+              onMouseEnter={(e) => (e.target as HTMLVideoElement).play().catch(() => { })}
               onMouseLeave={(e) => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0; }}
             />
           ) : (
@@ -388,139 +388,6 @@ function RaioXContent() {
           Análise profunda do seu perfil. Conecte para que nossa IA analise legendas, imagens, carrosséis e vídeos para desenhar sua Brand Persona completa.
         </p>
 
-        {/* --- Fine-Tuning Pipeline: 2-step sequential flow --- */}
-        <div className="bg-zinc-900/60 border border-white/5 rounded-2xl max-w-3xl mx-auto overflow-hidden">
-          <div className="px-5 py-4 border-b border-white/5">
-            <h3 className="text-white font-bold text-sm flex items-center gap-2">
-              <Zap className="w-4 h-4 text-amber-400" />
-              Pipeline de Fine-Tuning
-            </h3>
-            <p className="text-slate-500 text-xs mt-0.5">Execute os passos em ordem para gerar o dataset de treino da IA</p>
-          </div>
-
-          <div className="p-5 flex flex-col sm:flex-row gap-4">
-            {/* Step 1 */}
-            <div className={`flex-1 rounded-xl border p-4 transition-all ${
-              benchmarkStep === 'done' ? 'border-emerald-500/40 bg-emerald-500/5' :
-              benchmarkStep === 'error' ? 'border-red-500/40 bg-red-500/5' :
-              benchmarkStep === 'running' ? 'border-blue-500/40 bg-blue-500/5' :
-              'border-white/10 bg-zinc-800/30'
-            }`}>
-              <div className="flex items-center gap-2 mb-2">
-                <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                  benchmarkStep === 'done' ? 'bg-emerald-500 text-white' :
-                  benchmarkStep === 'running' ? 'bg-blue-500 text-white' :
-                  'bg-zinc-700 text-slate-300'
-                }`}>1</span>
-                <Globe className={`w-4 h-4 ${
-                  benchmarkStep === 'done' ? 'text-emerald-400' :
-                  benchmarkStep === 'running' ? 'text-blue-400 animate-pulse' :
-                  'text-slate-400'
-                }`} />
-                <span className="text-sm font-semibold text-white">Benchmark Global</span>
-              </div>
-              <p className="text-xs text-slate-400 mb-3 leading-relaxed">
-                Descobre automaticamente criadores virais em 5 países via Apify e analisa seus posts com IA.
-              </p>
-              {benchmarkMsg && (
-                <p className={`text-xs mb-3 ${
-                  benchmarkStep === 'error' ? 'text-red-400' : 'text-slate-400'
-                }`}>{benchmarkMsg}</p>
-              )}
-              <button
-                disabled={benchmarkStep === 'running'}
-                onClick={async () => {
-                  if (!confirm('Iniciar benchmark global? O processo roda em background — pode levar alguns minutos.')) return;
-                  setBenchmarkStep('running');
-                  setBenchmarkMsg('Descobrindo criadores virais via hashtags...');
-                  try {
-                    const res = await fetch(`${API_URL}/api/raio-x/benchmark-global`, { method: 'POST' });
-                    if (!res.ok) throw new Error(await res.text());
-                    setBenchmarkStep('done');
-                    setBenchmarkMsg('Benchmark iniciado em background! Aguarde alguns minutos e então baixe o JSONL.');
-                  } catch (e: any) {
-                    setBenchmarkStep('error');
-                    setBenchmarkMsg('Erro: ' + e.message);
-                  }
-                }}
-                className={`w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-sm font-medium transition-all ${
-                  benchmarkStep === 'running'
-                    ? 'bg-blue-600/30 text-blue-300 cursor-not-allowed'
-                    : benchmarkStep === 'done'
-                    ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30'
-                    : 'bg-blue-600/20 text-blue-400 border border-blue-500/30 hover:bg-blue-600/30'
-                }`}
-              >
-                {benchmarkStep === 'running' ? (
-                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Processando...</>
-                ) : benchmarkStep === 'done' ? (
-                  <><CheckCircle2 className="w-3.5 h-3.5" /> Concluído — Rodar novamente</>
-                ) : (
-                  <><Globe className="w-3.5 h-3.5" /> Rodar Benchmark Global</>
-                )}
-              </button>
-            </div>
-
-            {/* Arrow */}
-            <div className="flex items-center justify-center text-slate-600 text-xl font-bold sm:rotate-0 rotate-90">
-              →
-            </div>
-
-            {/* Step 2 */}
-            <div className={`flex-1 rounded-xl border p-4 transition-all ${
-              benchmarkStep !== 'done' ? 'opacity-40 border-white/5 bg-zinc-800/20' : 'border-purple-500/30 bg-purple-500/5'
-            }`}>
-              <div className="flex items-center gap-2 mb-2">
-                <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                  benchmarkStep === 'done' ? 'bg-purple-500 text-white' : 'bg-zinc-700 text-slate-500'
-                }`}>2</span>
-                <Download className={`w-4 h-4 ${
-                  benchmarkStep === 'done' ? 'text-purple-400' : 'text-slate-600'
-                }`} />
-                <span className={`text-sm font-semibold ${
-                  benchmarkStep === 'done' ? 'text-white' : 'text-slate-500'
-                }`}>Exportar Dataset</span>
-              </div>
-              <p className="text-xs text-slate-400 mb-3 leading-relaxed">
-                Gera o arquivo JSONL com as personas analisadas, pronto para upload na OpenAI Fine-Tuning.
-              </p>
-              <button
-                disabled={benchmarkStep !== 'done' || downloadingJsonl}
-                onClick={async () => {
-                  setDownloadingJsonl(true);
-                  try {
-                    const res = await fetch(`${API_URL}/api/fine-tune/export-jsonl`, { method: 'POST' });
-                    if (!res.ok) throw new Error(await res.text());
-                    const blob = await res.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'training_data.jsonl';
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  } catch (e: any) {
-                    alert('Erro ao baixar: ' + e.message);
-                  } finally {
-                    setDownloadingJsonl(false);
-                  }
-                }}
-                className={`w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg text-sm font-medium transition-all ${
-                  benchmarkStep !== 'done'
-                    ? 'bg-zinc-700/30 text-slate-600 cursor-not-allowed'
-                    : downloadingJsonl
-                    ? 'bg-purple-600/30 text-purple-300 cursor-not-allowed'
-                    : 'bg-purple-600/20 text-purple-400 border border-purple-500/30 hover:bg-purple-600/30'
-                }`}
-              >
-                {downloadingJsonl ? (
-                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Gerando JSONL...</>
-                ) : (
-                  <><Download className="w-3.5 h-3.5" /> Baixar training_data.jsonl</>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
 
       <div className="bg-zinc-900/40 border border-white/5 rounded-3xl shadow-2xl p-8 relative overflow-hidden backdrop-blur-2xl">

@@ -1,6 +1,6 @@
 import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
-import { SupabaseService } from '../supabase.service';
-import { OpenaiService } from '../openai.service';
+import { SupabaseService } from '../supabse/supabase.service';
+import { OpenaiService } from '../openai/openai.service';
 
 @Injectable()
 export class StudioService {
@@ -9,7 +9,7 @@ export class StudioService {
   constructor(
     private supabase: SupabaseService,
     private openai: OpenaiService,
-  ) {}
+  ) { }
 
   async getTrendsForProfile(profileId: string) {
     const sbClient = this.supabase.getClient();
@@ -24,7 +24,7 @@ export class StudioService {
       .limit(3);
 
     if (existingTrends && existingTrends.length >= 3) {
-        return existingTrends;
+      return existingTrends;
     }
 
     // 2. Fetch the Brand Persona
@@ -41,36 +41,36 @@ export class StudioService {
 
     // 3. Request OpenAI to generate new trends
     const newTrends = await this.openai.generateTrends({
-        nicho_principal: persona.content_niche,
-        subnichos: persona.subnichos || [],
-        pontos_fortes: persona.pontos_fortes || [],
-        pontos_fracos: persona.pontos_fracos || [],
-        fator_viralizacao: persona.fator_viralizacao || 0,
-        publico_alvo: persona.publico_alvo || 'Público geral',
-        posicionamento: persona.posicionamento || persona.tone_of_voice || '',
-        resumo_psicologico: persona.resumo_psicologico || persona.psychological_profile || '',
+      nicho_principal: persona.content_niche,
+      subnichos: persona.subnichos || [],
+      pontos_fortes: persona.pontos_fortes || [],
+      pontos_fracos: persona.pontos_fracos || [],
+      fator_viralizacao: persona.fator_viralizacao || 0,
+      publico_alvo: persona.publico_alvo || 'Público geral',
+      posicionamento: persona.posicionamento || persona.tone_of_voice || '',
+      resumo_psicologico: persona.resumo_psicologico || persona.psychological_profile || '',
     });
 
     if (newTrends.length === 0) {
-        return [];
+      return [];
     }
 
     // 4. Save to DB
     const insertData = newTrends.map((t) => ({
-        profile_id: profileId,
-        topic_title: t.title,
-        context_summary: t.summary,
-        relevance_score: Math.floor(Math.random() * (99 - 85 + 1)) + 85, // fake relevance
+      profile_id: profileId,
+      topic_title: t.title,
+      context_summary: t.summary,
+      relevance_score: Math.floor(Math.random() * (99 - 85 + 1)) + 85, // fake relevance
     }));
 
     const { data: inserted, error: insertError } = await sbClient
-        .from('trend_topics')
-        .insert(insertData)
-        .select('*');
+      .from('trend_topics')
+      .insert(insertData)
+      .select('*');
 
     if (insertError) {
-        this.logger.error('Failed to save trend_topics', insertError);
-        throw new HttpException('Database error saving trends', HttpStatus.INTERNAL_SERVER_ERROR);
+      this.logger.error('Failed to save trend_topics', insertError);
+      throw new HttpException('Database error saving trends', HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     return inserted;

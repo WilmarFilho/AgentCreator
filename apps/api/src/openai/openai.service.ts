@@ -57,7 +57,7 @@ export class OpenaiService {
       const dataUri = `data:image/jpeg;base64,${base64Data}`;
 
       const response = await this.openai.chat.completions.create({
-        model: 'gpt-4o',
+        model: 'gpt-4o-mini',
         messages: [
           {
             role: 'system',
@@ -147,6 +147,7 @@ Responda em Português Brasileiro de forma estruturada e concisa (máximo 300 pa
     }
   }
 
+
   // ─── DEEP PERSONA: Analyze using ALL content types ────────────────────
   async analyzePersonaDeep(content: DeepContentPayload): Promise<PersonaResult> {
     this.logger.log('Analyzing persona with DEEP analysis (captions + images + videos)...');
@@ -203,7 +204,12 @@ Responda em Português Brasileiro de forma estruturada e concisa (máximo 300 pa
     this.logger.debug(`Persona analysis content size: ${fullContent.length} chars (~${Math.ceil(fullContent.length / 4)} tokens)`);
 
     try {
+      // Pega o ID do modelo do ENV ou usa o padrão caso não exista
       const modelToUse = process.env.FINE_TUNED_MODEL_ID || 'gpt-4o';
+
+      // IMPORTANTE: O SYSTEM_PROMPT deve ser o mesmo usado no JSONL de treino!
+      const SYSTEM_PROMPT_TRAINED = "Você é um Estrategista Senior de Growth para Instagram. Sua base de conhecimento é fundamentada nos maiores best-sellers de marketing e retenção do mundo.";
+
       if (process.env.FINE_TUNED_MODEL_ID) {
         this.logger.log(`🧠 USING CUSTOM FINE-TUNED LLM: ${process.env.FINE_TUNED_MODEL_ID}`);
       }
@@ -213,38 +219,47 @@ Responda em Português Brasileiro de forma estruturada e concisa (máximo 300 pa
         messages: [
           {
             role: 'system',
-            content: `Você é um estrategista de marketing digital de elite, especialista em branding pessoal e análise comportamental de criadores de conteúdo.
-Você receberá uma amostra representativa do conteúdo de um perfil do Instagram, incluindo legendas, análises visuais e transcrições.
-Com base em TUDO isso, defina a Brand Persona completa.
+            content: `${SYSTEM_PROMPT_TRAINED}
+            
+Sua tarefa agora é analisar o conteúdo bruto de um perfil (legendas, imagens e vídeos) e gerar uma Brand Persona profunda.
+Você deve utilizar sua base de conhecimento técnica (Hook Point, Contagioso, StoryBrand, etc) para avaliar o posicionamento do criador.
 
-Responda APENAS com um JSON válido seguindo estritamente esta estrutura:
+Responda APENAS com um JSON válido seguindo esta estrutura:
 {
-  "nicho_principal": "Nicho principal percebido (ex: Finanças, Comédia)",
+  "nicho_principal": "Nicho principal percebido",
   "subnichos": ["Subnicho 1", "Subnicho 2"],
-  "pontos_fortes": ["Ponto forte 1", "Ponto forte 2"],
-  "pontos_fracos": ["Ponto fraco 1", "Ponto fraco 2"],
-  "fator_viralizacao": 0.0, // Deve basear-se no contexto de engajamento do prompt numérico
-  "resumo_psicologico": "Perfil psicológico profundo (arquétipos, ganchos emocionais)",
-  "publico_alvo": "Descrição da persona que mais consome este conteúdo",
-  "posicionamento": "Tom da voz (Motivacional, Irônico, Didático)"
+  "pontos_fortes": ["Mencione teorias aplicadas corretamente pelo criador"],
+  "pontos_fracos": ["Mencione falhas técnicas baseadas em marketing"],
+  "fator_viralizacao": 0.0, 
+  "resumo_psicologico": "Análise profunda usando arquétipos e gatilhos mentais identificados",
+  "publico_alvo": "Descrição da persona consumidora",
+  "posicionamento": "Tom da voz dominante"
 }`,
           },
           {
             role: 'user',
-            content: `Engajamento do Perfil:\n${content.metricsContext || 'Sem dados numéricos'}\n\nAnalise o seguinte conteúdo do perfil:\n\n${fullContent}`,
+            content: `CENÁRIO PARA ANÁLISE:
+Engajamento: ${content.metricsContext || 'Sem dados numéricos'}
+
+CONTEÚDO DO PERFIL:
+${fullContent}`,
           },
         ],
         response_format: { type: 'json_object' },
         max_tokens: 4000,
+        temperature: 0.3, // Temperatura baixa garante que ele use mais o treino e menos "criatividade" aleatória
       });
 
-      const parsed: PersonaResult = JSON.parse(response.choices[0]?.message?.content || '{}');
+      const contentResponse = response.choices[0]?.message?.content || '{}';
+      const parsed: PersonaResult = JSON.parse(contentResponse);
+
       return parsed;
     } catch (error) {
-      this.logger.error('Error in deep persona analysis', error);
+      this.logger.error('Error in deep persona analysis with Fine-Tuned model', error);
       throw error;
     }
   }
+
 
   // ─── LEGACY: Simple persona analysis (kept for backwards compat) ──────
   async analyzePersona(posts: string[]): Promise<PersonaResult> {
@@ -317,7 +332,7 @@ Respond ONLY with a valid JSON format following this exact structure:
 
       const content = response.choices[0]?.message?.content;
       if (!content) throw new Error('No content');
-      
+
       const parsed = JSON.parse(content);
       return parsed.trends || [];
     } catch (error) {
@@ -359,7 +374,7 @@ Respond ONLY with a valid JSON format following this exact structure:
 
       const content = response.choices[0]?.message?.content;
       if (!content) throw new Error('No content');
-      
+
       return JSON.parse(content);
     } catch (error) {
       this.logger.error('Error generating carousel', error);

@@ -11,7 +11,7 @@ export class StartAnalysisDto {
 
 @Controller('api/raio-x')
 export class RaioXController {
-  constructor(private readonly raioXService: RaioXService) {}
+  constructor(private readonly raioXService: RaioXService) { }
 
   @Post('start')
   @HttpCode(202)
@@ -22,14 +22,6 @@ export class RaioXController {
       dto.accessToken,
       dto.igUserId
     );
-  }
-
-  @Post('benchmark-global')
-  @HttpCode(202)
-  async runGlobalBenchmark() {
-    // Fire and forget returning 202
-    this.raioXService.runGlobalBenchmark().catch(console.error);
-    return { status: 'STARTED', message: 'Global Benchmark Started in background.' };
   }
 
   @Get('accounts')
@@ -50,20 +42,20 @@ export class RaioXController {
 
   @Get('oauth/callback')
   async facebookCallback(
-    @Query('code') code: string, 
+    @Query('code') code: string,
     @Query('state') state: string,
     @Res() res: any
   ) {
     if (!code || !state) {
       throw new Error('Invalid OAuth parameters');
     }
-    
+
     try {
       const decoded = JSON.parse(Buffer.from(state, 'base64').toString('ascii'));
       if (!decoded.profileId) throw new Error('No profileId in state');
-      
+
       const token = await this.raioXService.handleOauthCallback(code, decoded.profileId);
-      
+
       // Redirect to selection page
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       return res.redirect(`${frontendUrl}/dashboard/raio-x?step=select_account&token=${token}`);

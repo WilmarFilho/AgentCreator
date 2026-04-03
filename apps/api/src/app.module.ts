@@ -5,7 +5,7 @@ import { RaioXModule } from './raio-x/raio-x.module';
 import { ConfigModule } from '@nestjs/config';
 import { StudioModule } from './studio/studio.module';
 import { FactoryModule } from './factory/factory.module';
-import { FineTuneModule } from './fine-tune/fine-tune.module';
+import { KnowledgeBaseModule } from './fine-tune/knowledge-base.module';
 
 @Module({
   imports: [
@@ -13,9 +13,9 @@ import { FineTuneModule } from './fine-tune/fine-tune.module';
     RaioXModule,
     StudioModule,
     FactoryModule,
-    FineTuneModule
+    KnowledgeBaseModule
   ],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }
