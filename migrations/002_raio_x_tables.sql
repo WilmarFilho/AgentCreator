@@ -20,12 +20,6 @@ create table public.instagram_connections (
 create table public.brand_personas (
   id uuid default gen_random_uuid() primary key,
   profile_id uuid references public.profiles(id) on delete cascade not null,
-  primary_goal public.persona_goal,
-  content_niche text,
-  tone_of_voice text,
-  psychological_profile text,
-  visual_preferences jsonb,
-  last_analyzed_at timestamp with time zone default timezone('utc'::text, now()) not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );

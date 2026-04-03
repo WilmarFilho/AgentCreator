@@ -1,6 +1,6 @@
-# Arquitetura e Modelagem de Dados: Antigravity 🚀
+# Arquitetura e Modelagem de Dados: AgentForCreator 🚀
 
-Como Arquiteto de Sistemas Sênior, projetei a fundação do **Antigravity** focando em escalabilidade, integrações assíncronas (fundamentais para processamento de IA e geração de imagens) e na separação clara de responsabilidades entre as fases do seu plano de ação.
+Como Arquiteto de Sistemas Sênior, projetei a fundação do **AgentForCreator** focando em escalabilidade, integrações assíncronas (fundamentais para processamento de IA e geração de imagens) e na separação clara de responsabilidades entre as fases do seu plano de ação.
 
 Abaixo, detalho a modelagem do banco de dados relacional para o **PostgreSQL (Supabase)**, além de recomendações arquiteturais para o ecossistema (Next.js + NestJS).
 
@@ -49,12 +49,14 @@ Armazena os tokens de acesso de forma segura.
 Resultado do processamento da IA sobre o histórico do criador.
 - `id` (uuid, PK)
 - `profile_id` (uuid, FK -> profiles.id)
-- `primary_goal` (enum: 'sales', 'authority', 'growth')
-- `content_niche` (text)
-- `tone_of_voice` (text, ex: "Sarcástico, direto e embasado em dados")
-- `psychological_profile` (text)
-- `visual_preferences` (jsonb, preferências de cores e estilos extraídas se houver)
-- `last_analyzed_at` (timestamp)
+- `nicho_principal` (text)
+- `subnichos` (jsonb)
+- `pontos_fortes` (jsonb)
+- `pontos_fracos` (jsonb)
+- `fator_viralizacao` (numeric)
+- `resumo_psicologico` (text)
+- `publico_alvo` (text)
+- `posicionamento` (text)
 
 #### 1.2 Tabelas do Motor de Inteligência (Fase 2)
 

@@ -383,11 +383,14 @@ export class RaioXService {
     this.logger.log('💾 Saving deep persona to database...');
     const { error: personaError } = await sbClient.from('brand_personas').insert({
       profile_id: profileId,
-      primary_goal: persona.primary_goal,
-      content_niche: persona.content_niche,
-      tone_of_voice: persona.tone_of_voice,
-      psychological_profile: persona.psychological_profile,
-      visual_preferences: persona.visual_preferences,
+      nicho_principal: persona.nicho_principal,
+      subnichos: persona.subnichos,
+      pontos_fortes: persona.pontos_fortes,
+      pontos_fracos: persona.pontos_fracos,
+      fator_viralizacao: persona.fator_viralizacao,
+      resumo_psicologico: persona.resumo_psicologico,
+      publico_alvo: persona.publico_alvo,
+      posicionamento: persona.posicionamento,
     });
 
     if (personaError) {
