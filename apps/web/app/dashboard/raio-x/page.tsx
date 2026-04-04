@@ -15,35 +15,22 @@ const INITIAL_VISIBLE_POSTS = 10;
 
 // ─── PostCard (memoized for performance) ──────────────────────────────
 const PostCard = ({ post }: { post: any }) => {
-  const isVideo = post.media_type === 'VIDEO';
   const isCarousel = post.media_type === 'CAROUSEL_ALBUM';
 
-  const mediaPath = isVideo ? post.media_storage_path : (post.thumbnail_storage_path || post.media_storage_path);
+  const mediaPath = post.media_storage_path;
   const mediaUrl = mediaPath
     ? `${SUPABASE_URL}/storage/v1/object/public/raio-x-media/${mediaPath}`
     : null;
 
-  const config = isVideo
-    ? { label: 'Vídeo', color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' }
-    : isCarousel
-      ? { label: 'Carrossel', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' }
-      : { label: 'Foto', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' };
+  const config = isCarousel
+    ? { label: 'Carrossel', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' }
+    : { label: 'Foto', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' };
 
   return (
     <div className="bg-zinc-800/50 rounded-xl border border-white/5 overflow-hidden hover:border-white/15 transition-all group hover:shadow-lg hover:shadow-black/20">
       <div className="relative aspect-square bg-zinc-900/80 overflow-hidden">
         {mediaUrl ? (
-          isVideo ? (
-            <video
-              src={mediaUrl}
-              className="w-full h-full object-cover"
-              muted
-              playsInline
-              preload="metadata"
-              onMouseEnter={(e) => (e.target as HTMLVideoElement).play().catch(() => { })}
-              onMouseLeave={(e) => { const v = e.target as HTMLVideoElement; v.pause(); v.currentTime = 0; }}
-            />
-          ) : (
+          (
             <img
               src={mediaUrl}
               alt={post.caption?.substring(0, 50) || 'Post'}
@@ -54,11 +41,11 @@ const PostCard = ({ post }: { post: any }) => {
           )
         ) : (
           <div className="w-full h-full flex items-center justify-center text-slate-600">
-            {isVideo ? <Film className="w-10 h-10" /> : <Image className="w-10 h-10" />}
+            <Image className="w-10 h-10" />
           </div>
         )}
 
-        {isVideo && mediaUrl && (
+        {mediaUrl && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none group-hover:opacity-0 transition-opacity">
             <div className="w-10 h-10 rounded-full bg-black/50 backdrop-blur flex items-center justify-center">
               <Film className="w-5 h-5 text-white" />
@@ -76,7 +63,7 @@ const PostCard = ({ post }: { post: any }) => {
 
         <div className="absolute bottom-2 left-2">
           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border backdrop-blur-sm ${config.color}`}>
-            {isVideo ? <Film className="w-3 h-3" /> : isCarousel ? <Sparkles className="w-3 h-3" /> : <Image className="w-3 h-3" />}
+            {isCarousel ? <Sparkles className="w-3 h-3" /> : <Image className="w-3 h-3" />}
             {config.label}
           </span>
         </div>
@@ -464,12 +451,6 @@ function RaioXContent() {
                       <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-amber-500/15 text-amber-400 border border-amber-500/20">
                         <Sparkles className="w-3.5 h-3.5" />
                         {postStats.carousels} {postStats.carousels === 1 ? 'Carrossel' : 'Carrosséis'}
-                      </span>
-                    )}
-                    {postStats.videos > 0 && (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-purple-500/15 text-purple-400 border border-purple-500/20">
-                        <Film className="w-3.5 h-3.5" />
-                        {postStats.videos} {postStats.videos === 1 ? 'Vídeo' : 'Vídeos'}
                       </span>
                     )}
                     <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-zinc-700/50 text-slate-300 border border-white/10">

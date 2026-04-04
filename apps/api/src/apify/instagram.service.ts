@@ -49,38 +49,37 @@ export class InstagramService {
    * Instagram Graph API returns max 25 per page, so we paginate to get up to `limit`.
    */
   async fetchUserPosts(igUserId: string, accessToken: string, limit: number = 15): Promise<InstagramPost[]> {
-    this.logger.debug(`Fetching up to ${limit} posts for IG User: ${igUserId}...`);
-    const allPosts: InstagramPost[] = [];
+    this.logger.debug(`🎯 Buscando EXATAMENTE ${limit} posts (Imagens/Carrosséis) para o IG: ${igUserId}...`);
+
+    const validPosts: InstagramPost[] = [];
     let url: string | null = `${this.baseUrl}/${igUserId}/media`;
 
     try {
-      while (url && allPosts.length < limit) {
+      // O loop continua enquanto não enchermos o balde E houver páginas para ler
+      while (url && validPosts.length < limit) {
         const response: any = await axios.get(url, {
           params: {
             fields: 'id,caption,media_type,media_url,timestamp,like_count,comments_count,permalink',
             access_token: accessToken,
-            limit: Math.min(limit, 25),
+            limit: 20,
           },
         });
 
-        // Buscamos Insights (Impressões/Salvos) em paralelo para ganhar tempo
-        const posts: InstagramPost[] = await Promise.all(
-          response.data.data.map(async (post: any) => {
-            let views = 0;
-            let saved = 0;
-            let shares = 0;
-            let reach = 0;
-            let profile_visits = 0;
+        if (!response.data?.data) break;
 
-            // Só chamamos Insights para fotos/carrosséis (Economiza cota da API)
-            if (post.media_type !== 'VIDEO') {
-              const insightData = await this.getPostInsights(post.id, accessToken);
-              saved = insightData.saved;
-              views = insightData.views;
-              shares = insightData.shares;
-              reach = insightData.reach;
-              profile_visits = insightData.profile_visits;
-            }
+        // 1. Filtramos apenas o que interessa desta página específica
+        const filteredFromPage = response.data.data.filter(
+          (item: any) => item.media_type === 'IMAGE' || item.media_type === 'CAROUSEL_ALBUM'
+        );
+
+        // 2. Processamos os insights apenas para esses que passaram no filtro
+        // E garantimos que não vamos processar mais do que o necessário para completar o limite
+        const neededCount = limit - validPosts.length;
+        const toProcess = filteredFromPage.slice(0, neededCount);
+
+        const processedPosts: InstagramPost[] = await Promise.all(
+          toProcess.map(async (post: any) => {
+            const insightData = await this.getPostInsights(post.id, accessToken);
 
             return {
               id: post.id,
@@ -92,41 +91,39 @@ export class InstagramService {
               metrics: {
                 likes: Number(post.like_count) || 0,
                 comments: Number(post.comments_count) || 0,
-                saved,
-                views,
-                shares,
-                reach,
-                profile_visits,
+                saved: insightData.saved,
+                views: insightData.views,
+                shares: insightData.shares,
+                reach: insightData.reach,
+                profile_visits: insightData.profile_visits,
               },
             };
           })
         );
 
-        allPosts.push(...posts);
+        // 3. Adicionamos ao nosso balde principal
+        validPosts.push(...processedPosts);
+
+        // 4. Atualizamos a URL para a próxima página de scroll do Instagram
         url = response.data.paging?.next || null;
+
+        this.logger.debug(`Status da coleta: ${validPosts.length}/${limit} posts válidos encontrados...`);
       }
 
-      const result = allPosts.slice(0, limit);
+      this.logger.log(`✅ Coleta finalizada com ${validPosts.length} posts (Imagens/Carrosséis).`);
+      return validPosts;
 
-      // ─── ENRIQUECIMENTO DE VÍDEOS COM APIFY ───
-      // Filtramos apenas onde media_type === 'VIDEO' para não gastar Apify com fotos
-      const videoPosts = result.filter(p => p.media_type === 'VIDEO');
-
-      if (this.apifyClient && videoPosts.length > 0) {
-        return await this.enrichMetricsWithApify(result);
-      }
-
-      return result;
     } catch (error: any) {
-      this.logger.error('Failed to fetch Instagram posts', error.message);
+      this.logger.error('Erro crítico na coleta de posts filtrados', error.message);
       throw error;
     }
   }
+
   async getPostInsights(postId: string, accessToken: string): Promise<{ saved: number, views: number, shares: number, reach: number, profile_visits: number }> {
     try {
       const response = await axios.get(`${this.baseUrl}/${postId}/insights`, {
         params: {
-          metric: 'views,saved, shares, reach, profile_visits',
+          metric: 'views,saved,shares,reach,profile_visits',
           access_token: accessToken,
         },
       });
@@ -144,52 +141,6 @@ export class InstagramService {
     } catch (error) {
       this.logger.error(`Insights fail for ${postId}: ${error.response?.data?.error?.message || error.message}`);
       return { saved: 0, views: 0, shares: 0, reach: 0, profile_visits: 0 };
-    }
-  }
-
-  private async enrichMetricsWithApify(posts: InstagramPost[]): Promise<InstagramPost[]> {
-    this.logger.log(`🚀 Apify Enrichment: Processing ${posts.length} posts...`);
-
-    try {
-      // Filtramos URLs apenas de vídeos para o scraper ser mais rápido
-      const videoUrls = posts
-        .filter(p => p.media_type === 'VIDEO')
-        .map(p => p.permalink)
-        .filter(Boolean);
-
-      if (videoUrls.length === 0) return posts;
-
-      if (!this.apifyClient) {
-        this.logger.error('Apify Client not initialized');
-        return posts;
-      }
-
-      const run = await this.apifyClient.actor("apify/instagram-scraper").call({
-        directUrls: videoUrls,
-        resultsLimit: videoUrls.length,
-        scrapeComments: false, // Otimiza performance
-      });
-
-      const { items } = (await this.apifyClient.dataset(run.defaultDatasetId).listItems()) as any;
-
-      return posts.map(post => {
-        const scraped = items.find((item: any) => item.url === post.permalink || item.id === post.id);
-        this.logger.log(`Scraped data for post ${post.id}:`, scraped);
-
-        if (scraped && post.media_type === 'VIDEO') {
-          return {
-            ...post,
-            metrics: {
-              ...post.metrics,
-              views: scraped.videoViewCount || scraped.playCount || 0,
-            },
-          };
-        }
-        return post;
-      });
-    } catch (error) {
-      this.logger.error('Apify failed, keeping graph metrics', error.message);
-      return posts;
     }
   }
 

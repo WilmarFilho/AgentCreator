@@ -31,7 +31,6 @@ create table public.post_metrics (
   ig_media_id text not null,
   media_type public.media_type not null,
   caption text,
-  engagement_score numeric,
   metrics jsonb,
   posted_at timestamp with time zone not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
@@ -74,3 +73,7 @@ create policy "Users can update their own post metrics." on public.post_metrics
 
 -- Realtime Setup for brand_personas
 alter publication supabase_realtime add table public.brand_personas;
+
+
+ALTER TABLE instagram_connections 
+ADD CONSTRAINT instagram_connections_profile_id_key UNIQUE (profile_id);

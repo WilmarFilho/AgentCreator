@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { SupabaseService } from '../supabse/supabase.service';
-import { InstagramService, InstagramPost, CarouselChild } from '../apify/instagram.service';
+import { InstagramService } from '../apify/instagram.service';
 import { OpenaiService, DeepContentPayload } from '../openai/openai.service';
 import { MediaProcessorService } from './media-processor.service';
 
@@ -140,7 +140,7 @@ export class RaioXService {
       let thumbnailStoragePath: string | null = null;
 
       if (post.media_url) {
-        const mediaType = post.media_type === 'VIDEO' ? 'VIDEO' : 'IMAGE';
+        const mediaType = 'IMAGE';
         const result = await this.mediaProcessor.downloadAndStoreMedia(
           post.media_url,
           profileId,
@@ -274,7 +274,7 @@ export class RaioXService {
             const slideResult = await this.mediaProcessor.downloadAndStoreMedia(
               child.media_url,
               profileId,
-              child.media_type,
+              'IMAGE',
               `slide_${post.id}_${slideIdx}`,
               sbClient,
             );
@@ -310,61 +310,7 @@ export class RaioXService {
             }
           }
 
-          if (child.media_type === 'VIDEO' && child.media_url) {
-            try {
-              this.logger.debug(`🎬 Transcribing carousel video slide ${slideIdx + 1}...`);
-              const audioBuffer = await this.mediaProcessor.extractAudioFromVideo(child.media_url);
-              const transcription = await this.openai.transcribeAudio(audioBuffer);
-              deepContent.videoTranscriptions.push(transcription);
-
-              await sbClient.from('post_content_analysis').insert({
-                post_metric_id: dbRecord.dbId,
-                profile_id: profileId,
-                content_type: 'video_transcription',
-                content_text: transcription,
-                media_url: child.media_url,
-                slide_index: slideIdx,
-                storage_path: slideStoragePath,
-              });
-
-              ragDocuments.push({
-                content: transcription,
-                sourceType: 'video_transcription',
-                sourcePostId: dbRecord.dbId,
-                metadata: { media_type: 'CAROUSEL_VIDEO', slide_index: slideIdx, posted_at: post.timestamp },
-              });
-            } catch (err: any) {
-              this.logger.warn(`Failed to transcribe carousel video slide ${slideIdx}: ${err.message}`);
-            }
-          }
         });
-      }
-
-      // 3d. VIDEO/REELS — Download, extract audio, transcribe
-      if (post.media_type === 'VIDEO' && post.media_url) {
-        try {
-          this.logger.debug(`🎬 Processing video/reel for ${postLabel}...`);
-          const audioBuffer = await this.mediaProcessor.extractAudioFromVideo(post.media_url);
-          const transcription = await this.openai.transcribeAudio(audioBuffer);
-          deepContent.videoTranscriptions.push(transcription);
-
-          await sbClient.from('post_content_analysis').insert({
-            post_metric_id: dbRecord.dbId,
-            profile_id: profileId,
-            content_type: 'video_transcription',
-            content_text: transcription,
-            media_url: post.media_url,
-          });
-
-          ragDocuments.push({
-            content: transcription,
-            sourceType: 'video_transcription',
-            sourcePostId: dbRecord.dbId,
-            metadata: { media_type: 'VIDEO', posted_at: post.timestamp },
-          });
-        } catch (err: any) {
-          this.logger.warn(`Failed to process video for ${postLabel}: ${err.message}`);
-        }
       }
     });
 
@@ -372,7 +318,6 @@ export class RaioXService {
     this.logger.log(`✅ Content extraction complete in ${extractionSec}s!`);
     this.logger.log(`   📝 Captions: ${deepContent.captions.length}`);
     this.logger.log(`   🖼️  Image analyses: ${deepContent.imageAnalyses.length}`);
-    this.logger.log(`   🎬 Video transcriptions: ${deepContent.videoTranscriptions.length}`);
 
     // ─── STEP 4: Generate embeddings and save RAG documents ───────────
     this.logger.log('🧠 Generating embeddings for RAG storage...');
@@ -437,11 +382,6 @@ export class RaioXService {
     } else {
       this.logger.log('✅ Conexão salva ou atualizada com sucesso no banco!');
     }
-
-    this.logger.log('profileId', profileId);
-    this.logger.log('igUserId', igUserId);
-    this.logger.log('handle', handle);
-    this.logger.log('token', token);
 
     this.logger.log(`🏁 Finished DEEP RaioX for @${handle}. ${posts.length} posts analyzed, RAG saved.`);
   }
