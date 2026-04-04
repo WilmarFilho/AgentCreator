@@ -20,9 +20,11 @@ export interface InstagramPost {
   metrics: {
     likes: number;
     comments: number;
-    impressions: number;
     saved: number;
-    views: number; // Preenchido via Apify para Vídeos
+    views: number;
+    shares: number;
+    reach: number;
+    profile_visits: number;
   };
 }
 
@@ -64,14 +66,20 @@ export class InstagramService {
         // Buscamos Insights (Impressões/Salvos) em paralelo para ganhar tempo
         const posts: InstagramPost[] = await Promise.all(
           response.data.data.map(async (post: any) => {
-            let impressions = 0;
+            let views = 0;
             let saved = 0;
+            let shares = 0;
+            let reach = 0;
+            let profile_visits = 0;
 
             // Só chamamos Insights para fotos/carrosséis (Economiza cota da API)
             if (post.media_type !== 'VIDEO') {
               const insightData = await this.getPostInsights(post.id, accessToken);
-              impressions = insightData.impressions;
               saved = insightData.saved;
+              views = insightData.views;
+              shares = insightData.shares;
+              reach = insightData.reach;
+              profile_visits = insightData.profile_visits;
             }
 
             return {
@@ -84,9 +92,11 @@ export class InstagramService {
               metrics: {
                 likes: Number(post.like_count) || 0,
                 comments: Number(post.comments_count) || 0,
-                impressions,
                 saved,
-                views: 0, // Será preenchido pelo Apify se for vídeo
+                views,
+                shares,
+                reach,
+                profile_visits,
               },
             };
           })
@@ -112,11 +122,11 @@ export class InstagramService {
       throw error;
     }
   }
-  async getPostInsights(postId: string, accessToken: string): Promise<{ impressions: number; saved: number }> {
+  async getPostInsights(postId: string, accessToken: string): Promise<{ saved: number, views: number, shares: number, reach: number, profile_visits: number }> {
     try {
       const response = await axios.get(`${this.baseUrl}/${postId}/insights`, {
         params: {
-          metric: 'impressions,saved', // Removido espaço extra para evitar erro de encoding
+          metric: 'views,saved, shares, reach, profile_visits',
           access_token: accessToken,
         },
       });
@@ -125,12 +135,15 @@ export class InstagramService {
       const getVal = (name: string) => data.find((m: any) => m.name === name)?.values[0]?.value || 0;
 
       return {
-        impressions: getVal('impressions'),
         saved: getVal('saved'),
+        views: getVal('views'),
+        shares: getVal('shares'),
+        reach: getVal('reach'),
+        profile_visits: getVal('profile_visits'),
       };
     } catch (error) {
       this.logger.error(`Insights fail for ${postId}: ${error.response?.data?.error?.message || error.message}`);
-      return { impressions: 0, saved: 0 };
+      return { saved: 0, views: 0, shares: 0, reach: 0, profile_visits: 0 };
     }
   }
 
@@ -161,14 +174,14 @@ export class InstagramService {
 
       return posts.map(post => {
         const scraped = items.find((item: any) => item.url === post.permalink || item.id === post.id);
+        this.logger.log(`Scraped data for post ${post.id}:`, scraped);
 
         if (scraped && post.media_type === 'VIDEO') {
           return {
             ...post,
             metrics: {
-              ...post.metrics, // CRITICAL: Mantém impressions e saved que vieram da Graph API!
+              ...post.metrics,
               views: scraped.videoViewCount || scraped.playCount || 0,
-              likes: scraped.likesCount || post.metrics.likes,
             },
           };
         }
