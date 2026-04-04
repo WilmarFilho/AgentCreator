@@ -174,6 +174,8 @@ export class RaioXService {
         }
       }
 
+
+
       const { data, error } = await sbClient.from('post_metrics').insert({
         profile_id: profileId,
         ig_media_id: post.id,
@@ -421,13 +423,20 @@ export class RaioXService {
     }
 
     // ─── STEP 8: Save Instagram Connection ────────────────────────────
-    await sbClient.from('instagram_connections').upsert({
+    const { data, error: connError } = await sbClient.from('instagram_connections').upsert({
       profile_id: profileId,
       ig_user_id: igUserId,
       username: handle,
       access_token: token,
       status: 'active',
     }, { onConflict: 'profile_id' });
+
+    if (connError) {
+      this.logger.error(`❌ Erro ao salvar conexão: ${connError.message}`);
+      this.logger.error(`Detalhes: ${connError.details} | Hint: ${connError.hint}`);
+    } else {
+      this.logger.log('✅ Conexão salva ou atualizada com sucesso no banco!');
+    }
 
     this.logger.log('profileId', profileId);
     this.logger.log('igUserId', igUserId);

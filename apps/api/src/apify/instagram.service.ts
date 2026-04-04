@@ -9,33 +9,20 @@ export interface CarouselChild {
   media_url: string;
 }
 
-interface CreatorDiscoveryOptions {
-  postsPerHashtag?: number;
-  topCreatorsPerCountry?: number;
-  category?: 'lifestyle' | 'marketing' | 'tech'; // Exemplo de nicho
-}
-
-interface ApifyInstagramScrapedPost {
-  id: string;
-  url: string;
-  likesCount?: number;
-  commentsCount?: number;
-  videoViewCount?: number;
-  playCount?: number;
-}
-
 export interface InstagramPost {
   id: string;
   media_type: 'IMAGE' | 'VIDEO' | 'CAROUSEL_ALBUM';
   caption: string;
+  children?: CarouselChild[];
   timestamp: string;
   media_url?: string;
-  permalink?: string; // Fundamental para o Apify funcionar
-  children?: CarouselChild[];
+  permalink?: string;
   metrics: {
     likes: number;
     comments: number;
-    views: number;
+    impressions: number;
+    saved: number;
+    views: number; // Preenchido via Apify para Vídeos
   };
 }
 
@@ -74,100 +61,122 @@ export class InstagramService {
           },
         });
 
-        if (!response.data || !response.data.data) {
-          throw new Error('Invalid response from Instagram API');
-        }
+        // Buscamos Insights (Impressões/Salvos) em paralelo para ganhar tempo
+        const posts: InstagramPost[] = await Promise.all(
+          response.data.data.map(async (post: any) => {
+            let impressions = 0;
+            let saved = 0;
 
-        const pagePostsCount = response.data.data.length;
-        this.logger.debug(`Page fetched: ${pagePostsCount} posts found.`);
+            // Só chamamos Insights para fotos/carrosséis (Economiza cota da API)
+            if (post.media_type !== 'VIDEO') {
+              const insightData = await this.getPostInsights(post.id, accessToken);
+              impressions = insightData.impressions;
+              saved = insightData.saved;
+            }
 
-        // Mapeamento corrigido para evitar o erro de tipagem
-        const posts: InstagramPost[] = response.data.data.map((post: any) => ({
-          id: post.id,
-          media_type: post.media_type,
-          caption: post.caption || '',
-          timestamp: post.timestamp,
-          media_url: post.media_url || undefined,
-          permalink: post.permalink || undefined,
-          metrics: {
-            likes: Number(post.like_count) || 0,
-            comments: Number(post.comments_count) || 0,
-            views: 0, // Será preenchido pelo Apify no enriquecimento
-          },
-        }));
+            return {
+              id: post.id,
+              media_type: post.media_type,
+              caption: post.caption || '',
+              timestamp: post.timestamp,
+              media_url: post.media_url,
+              permalink: post.permalink,
+              metrics: {
+                likes: Number(post.like_count) || 0,
+                comments: Number(post.comments_count) || 0,
+                impressions,
+                saved,
+                views: 0, // Será preenchido pelo Apify se for vídeo
+              },
+            };
+          })
+        );
 
         allPosts.push(...posts);
         url = response.data.paging?.next || null;
       }
 
       const result = allPosts.slice(0, limit);
-      this.logger.log(`Total posts fetched from Graph API: ${result.length}`);
 
-      // Só chama o Apify se o cliente estiver inicializado
-      if (this.apifyClient) {
+      // ─── ENRIQUECIMENTO DE VÍDEOS COM APIFY ───
+      // Filtramos apenas onde media_type === 'VIDEO' para não gastar Apify com fotos
+      const videoPosts = result.filter(p => p.media_type === 'VIDEO');
+
+      if (this.apifyClient && videoPosts.length > 0) {
         return await this.enrichMetricsWithApify(result);
       }
 
       return result;
     } catch (error: any) {
-      this.logger.error('Failed to fetch Instagram posts', error.response?.data || error.message);
+      this.logger.error('Failed to fetch Instagram posts', error.message);
       throw error;
     }
   }
+  async getPostInsights(postId: string, accessToken: string): Promise<{ impressions: number; saved: number }> {
+    try {
+      const response = await axios.get(`${this.baseUrl}/${postId}/insights`, {
+        params: {
+          metric: 'impressions,saved', // Removido espaço extra para evitar erro de encoding
+          access_token: accessToken,
+        },
+      });
 
-  /**
-   * Usa o Apify para buscar views e métricas exatas que a Graph API esconde
-   */
+      const data = response.data.data;
+      const getVal = (name: string) => data.find((m: any) => m.name === name)?.values[0]?.value || 0;
+
+      return {
+        impressions: getVal('impressions'),
+        saved: getVal('saved'),
+      };
+    } catch (error) {
+      this.logger.error(`Insights fail for ${postId}: ${error.response?.data?.error?.message || error.message}`);
+      return { impressions: 0, saved: 0 };
+    }
+  }
+
   private async enrichMetricsWithApify(posts: InstagramPost[]): Promise<InstagramPost[]> {
-    this.logger.log(`🚀 Enriching ${posts.length} posts with Apify metrics...`);
+    this.logger.log(`🚀 Apify Enrichment: Processing ${posts.length} posts...`);
 
     try {
-      const urlsToScrape = posts.map(p => p.permalink).filter(Boolean);
-      this.logger.debug(`URLs to scrape: ${urlsToScrape.join(', ')}`);
+      // Filtramos URLs apenas de vídeos para o scraper ser mais rápido
+      const videoUrls = posts
+        .filter(p => p.media_type === 'VIDEO')
+        .map(p => p.permalink)
+        .filter(Boolean);
 
-      // Usamos o "apify/instagram-scraper" para pegar métricas públicas
-      const input = {
-        directUrls: urlsToScrape,
-        resultsLimit: posts.length,
-      };
+      if (videoUrls.length === 0) return posts;
 
       if (!this.apifyClient) {
         this.logger.error('Apify Client not initialized');
         return posts;
       }
 
-      // Inicia a tarefa no Apify
-      this.logger.log('Starting Apify instagram-scraper actor...');
-      const run = await this.apifyClient.actor("apify/instagram-scraper").call(input);
-      this.logger.log(`Apify run started: ${run.id}. Fetching results from dataset...`);
+      const run = await this.apifyClient.actor("apify/instagram-scraper").call({
+        directUrls: videoUrls,
+        resultsLimit: videoUrls.length,
+        scrapeComments: false, // Otimiza performance
+      });
+
       const { items } = (await this.apifyClient.dataset(run.defaultDatasetId).listItems()) as any;
-      this.logger.log(`Apify returned ${items?.length} items.`);
 
-      let enrichedCount = 0;
+      return posts.map(post => {
+        const scraped = items.find((item: any) => item.url === post.permalink || item.id === post.id);
 
-      // Mapeia os resultados de volta para os posts originais
-      const enrichedPosts = posts.map(post => {
-        const scrapedData = items.find((item: any) => item.id === post.id || item.url === post.permalink) as ApifyInstagramScrapedPost | undefined;
-
-        if (scrapedData) {
-          enrichedCount++;
+        if (scraped && post.media_type === 'VIDEO') {
           return {
             ...post,
             metrics: {
-              likes: scrapedData.likesCount ?? post.metrics.likes,
-              comments: scrapedData.commentsCount ?? post.metrics.comments,
-              views: scrapedData.videoViewCount ?? scrapedData.playCount ?? 0,
-            }
+              ...post.metrics, // CRITICAL: Mantém impressions e saved que vieram da Graph API!
+              views: scraped.videoViewCount || scraped.playCount || 0,
+              likes: scraped.likesCount || post.metrics.likes,
+            },
           };
         }
         return post;
       });
-
-      this.logger.log(`Enrichment complete. ${enrichedCount}/${posts.length} posts updated with enhanced metrics.`);
-      return enrichedPosts;
     } catch (error) {
-      this.logger.error('Apify enrichment failed, returning basic metrics', error.message);
-      return posts; // Fallback para métricas básicas se o scraper falhar
+      this.logger.error('Apify failed, keeping graph metrics', error.message);
+      return posts;
     }
   }
 
@@ -202,6 +211,7 @@ export class InstagramService {
       return [];
     }
   }
+
 
   getAuthorizationUrl(profileId: string): string {
     const appId = process.env.FACEBOOK_APP_ID;
