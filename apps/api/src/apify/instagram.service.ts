@@ -15,16 +15,28 @@ interface CreatorDiscoveryOptions {
   category?: 'lifestyle' | 'marketing' | 'tech'; // Exemplo de nicho
 }
 
+interface ApifyInstagramScrapedPost {
+  id: string;
+  url: string;
+  likesCount?: number;
+  commentsCount?: number;
+  videoViewCount?: number;
+  playCount?: number;
+}
+
 export interface InstagramPost {
   id: string;
   media_type: 'IMAGE' | 'VIDEO' | 'CAROUSEL_ALBUM';
   caption: string;
   timestamp: string;
   media_url?: string;
+  permalink?: string; // Fundamental para o Apify funcionar
   children?: CarouselChild[];
-  like_count?: number;
-  comments_count?: number;
-  view_count?: number; // Fetched via Apify or Insights
+  metrics: {
+    likes: number;
+    comments: number;
+    views: number;
+  };
 }
 
 @Injectable()
@@ -48,18 +60,17 @@ export class InstagramService {
    * Instagram Graph API returns max 25 per page, so we paginate to get up to `limit`.
    */
   async fetchUserPosts(igUserId: string, accessToken: string, limit: number = 15): Promise<InstagramPost[]> {
-    this.logger.debug(`Fetching up to ${limit} posts from Instagram for IG User: ${igUserId}...`);
+    this.logger.debug(`Fetching up to ${limit} posts for IG User: ${igUserId}...`);
     const allPosts: InstagramPost[] = [];
     let url: string | null = `${this.baseUrl}/${igUserId}/media`;
-    const perPage = Math.min(limit, 25); // API max per request
 
     try {
       while (url && allPosts.length < limit) {
         const response: any = await axios.get(url, {
           params: {
-            fields: 'id,caption,media_type,media_url,timestamp,like_count,comments_count',
+            fields: 'id,caption,media_type,media_url,timestamp,like_count,comments_count,permalink',
             access_token: accessToken,
-            limit: perPage,
+            limit: Math.min(limit, 25),
           },
         });
 
@@ -67,33 +78,96 @@ export class InstagramService {
           throw new Error('Invalid response from Instagram API');
         }
 
+        const pagePostsCount = response.data.data.length;
+        this.logger.debug(`Page fetched: ${pagePostsCount} posts found.`);
+
+        // Mapeamento corrigido para evitar o erro de tipagem
         const posts: InstagramPost[] = response.data.data.map((post: any) => ({
           id: post.id,
           media_type: post.media_type,
           caption: post.caption || '',
           timestamp: post.timestamp,
           media_url: post.media_url || undefined,
-          like_count: post.like_count || 0,
-          comments_count: post.comments_count || 0,
-          // Se o post for video, a Graph API oficial não retorna view_count no endpoint básico.
-          // Deixamos como 0 para ser preenchido pela integração com APIFY no Raio-X.
-          view_count: 0,
+          permalink: post.permalink || undefined,
+          metrics: {
+            likes: Number(post.like_count) || 0,
+            comments: Number(post.comments_count) || 0,
+            views: 0, // Será preenchido pelo Apify no enriquecimento
+          },
         }));
 
         allPosts.push(...posts);
-
-        // Check for next page cursor
         url = response.data.paging?.next || null;
-        this.logger.debug(`Fetched ${allPosts.length} posts so far... (has next page: ${!!url})`);
       }
 
-      // Trim to exact limit
       const result = allPosts.slice(0, limit);
-      this.logger.debug(`Fetched ${result.length} posts total.`);
+      this.logger.log(`Total posts fetched from Graph API: ${result.length}`);
+
+      // Só chama o Apify se o cliente estiver inicializado
+      if (this.apifyClient) {
+        return await this.enrichMetricsWithApify(result);
+      }
+
       return result;
     } catch (error: any) {
       this.logger.error('Failed to fetch Instagram posts', error.response?.data || error.message);
       throw error;
+    }
+  }
+
+  /**
+   * Usa o Apify para buscar views e métricas exatas que a Graph API esconde
+   */
+  private async enrichMetricsWithApify(posts: InstagramPost[]): Promise<InstagramPost[]> {
+    this.logger.log(`🚀 Enriching ${posts.length} posts with Apify metrics...`);
+
+    try {
+      const urlsToScrape = posts.map(p => p.permalink).filter(Boolean);
+      this.logger.debug(`URLs to scrape: ${urlsToScrape.join(', ')}`);
+
+      // Usamos o "apify/instagram-scraper" para pegar métricas públicas
+      const input = {
+        directUrls: urlsToScrape,
+        resultsLimit: posts.length,
+      };
+
+      if (!this.apifyClient) {
+        this.logger.error('Apify Client not initialized');
+        return posts;
+      }
+
+      // Inicia a tarefa no Apify
+      this.logger.log('Starting Apify instagram-scraper actor...');
+      const run = await this.apifyClient.actor("apify/instagram-scraper").call(input);
+      this.logger.log(`Apify run started: ${run.id}. Fetching results from dataset...`);
+      const { items } = (await this.apifyClient.dataset(run.defaultDatasetId).listItems()) as any;
+      this.logger.log(`Apify returned ${items?.length} items.`);
+
+      let enrichedCount = 0;
+
+      // Mapeia os resultados de volta para os posts originais
+      const enrichedPosts = posts.map(post => {
+        const scrapedData = items.find((item: any) => item.id === post.id || item.url === post.permalink) as ApifyInstagramScrapedPost | undefined;
+
+        if (scrapedData) {
+          enrichedCount++;
+          return {
+            ...post,
+            metrics: {
+              likes: scrapedData.likesCount ?? post.metrics.likes,
+              comments: scrapedData.commentsCount ?? post.metrics.comments,
+              views: scrapedData.videoViewCount ?? scrapedData.playCount ?? 0,
+            }
+          };
+        }
+        return post;
+      });
+
+      this.logger.log(`Enrichment complete. ${enrichedCount}/${posts.length} posts updated with enhanced metrics.`);
+      return enrichedPosts;
+    } catch (error) {
+      this.logger.error('Apify enrichment failed, returning basic metrics', error.message);
+      return posts; // Fallback para métricas básicas se o scraper falhar
     }
   }
 
@@ -158,7 +232,9 @@ export class InstagramService {
         },
       });
 
-      return response.data.access_token;
+      const token = response.data.access_token;
+      this.logger.log('Access token successfully exchanged.');
+      return token;
     } catch (error: any) {
       this.logger.error('Erro ao trocar auth code por access token', error.response?.data || error.message);
       throw error;

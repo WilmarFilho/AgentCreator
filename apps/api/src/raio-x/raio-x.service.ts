@@ -182,6 +182,7 @@ export class RaioXService {
         posted_at: post.timestamp,
         media_storage_path: mediaStoragePath,
         thumbnail_storage_path: thumbnailStoragePath,
+        metrics: post.metrics,
       }).select('id').single();
 
       if (error) {
@@ -427,6 +428,11 @@ export class RaioXService {
       access_token: token,
       status: 'active',
     }, { onConflict: 'profile_id' });
+
+    this.logger.log('profileId', profileId);
+    this.logger.log('igUserId', igUserId);
+    this.logger.log('handle', handle);
+    this.logger.log('token', token);
 
     this.logger.log(`🏁 Finished DEEP RaioX for @${handle}. ${posts.length} posts analyzed, RAG saved.`);
   }
