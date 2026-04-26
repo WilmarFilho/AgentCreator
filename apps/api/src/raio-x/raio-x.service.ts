@@ -44,6 +44,13 @@ export class RaioXService {
 
   async saveObjectives(profileId: string, objectives: Record<string, string>) {
     const sbClient = this.supabase.getClient();
+    
+    // Check old objectives to see if competitor changed
+    const oldObj = await this.getObjectives(profileId);
+    const oldCompetitor = oldObj?.competitors || '';
+    const newCompetitor = objectives.competitors || '';
+    const competitorChanged = newCompetitor && newCompetitor !== oldCompetitor;
+
     const { data, error } = await sbClient.from('creator_objectives').upsert({
       profile_id: profileId,
       business_type: objectives.business_type || null,
@@ -51,14 +58,25 @@ export class RaioXService {
       content_goals: objectives.content_goals || null,
       monetization_strategy: objectives.monetization_strategy || null,
       brand_values: objectives.brand_values || null,
-      competitors: objectives.competitors || null,
+      competitors: newCompetitor || null,
       extra_notes: objectives.extra_notes || null,
+      ...(competitorChanged ? { competitor_analysis_status: 'running' } : {}),
       updated_at: new Date().toISOString(),
     }, { onConflict: 'profile_id' }).select().single();
 
     if (error) {
       this.logger.error('Failed to save objectives:', error.message);
       throw error;
+    }
+    
+    if (competitorChanged) {
+      this.runCompetitorDeepAnalysis(profileId, newCompetitor).catch(err => {
+        this.logger.error('Background competitor deep analysis flow failed', err);
+        sbClient.from('creator_objectives')
+          .update({ competitor_analysis_status: 'error' })
+          .eq('profile_id', profileId)
+          .then();
+      });
     }
 
     // Also save objectives to RAG for future consumption
@@ -498,5 +516,51 @@ export class RaioXService {
     }
 
     await Promise.all(executing);
+  }
+
+  private async runCompetitorDeepAnalysis(profileId: string, handle: string): Promise<void> {
+    const sbClient = this.supabase.getClient();
+    try {
+      this.logger.log(`Starting competitor deep analysis for @${handle}`);
+
+      const cleanHandle = handle.replace('@', '').trim();
+      const rawPosts = await this.instagram.fetchPublicProfileCaptions(cleanHandle, 30, 20);
+
+      if (!rawPosts || rawPosts.length === 0) {
+        throw new Error(`No recent posts found for competitor @${cleanHandle}`);
+      }
+
+      const captions = rawPosts.map(p => p.caption);
+
+      // Verify profile persona for context
+      const { data: personaData } = await sbClient.from('brand_personas').select('*').eq('profile_id', profileId).single();
+      const persona = personaData || {};
+
+      // Run deep competitor analysis in OpenAI
+      const analysisText = await this.openai.analyzeCompetitorPosts(cleanHandle, captions, persona);
+
+      // Upsert into competitor_analyses table
+      await sbClient.from('competitor_analyses').upsert({
+        profile_id: profileId,
+        competitors_text: cleanHandle,
+        analysis_text: analysisText,
+      }, { onConflict: 'profile_id, competitors_text' });
+
+      // Update creator_objectives status to completed
+      await sbClient.from('creator_objectives')
+        .update({ competitor_analysis_status: 'completed' })
+        .eq('profile_id', profileId);
+
+      this.logger.log(`Background competitor deep analysis completed for @${cleanHandle}`);
+    } catch (error: any) {
+      this.logger.error(`Failed competitor deep analysis for @${handle}:`, error.message);
+      
+      // Update creator_objectives status to error
+      await sbClient.from('creator_objectives')
+        .update({ competitor_analysis_status: 'error' })
+        .eq('profile_id', profileId);
+      
+      throw error;
+    }
   }
 }

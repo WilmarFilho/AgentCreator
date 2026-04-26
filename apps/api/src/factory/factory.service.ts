@@ -62,7 +62,15 @@ export class FactoryService {
     }
 
     // 2. Format Context for LLM
-    const promptTopic = `Title: ${topic.topic_title}\nContext: ${topic.context_summary}`;
+    const promptTopic = [
+      `Title: ${topic.topic_title}`,
+      `Context: ${topic.context_summary}`,
+      topic.source ? `Source: ${topic.source}` : null,
+      topic.published_at ? `Published At: ${topic.published_at}` : null,
+      topic.source_url ? `Source URL: ${topic.source_url}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
     const promptTemplate = `Template Layout: ${template.name}. Consider making sentences short and impactful suitable for an Instagram Carousel with multiple slides.`;
 
     // 3. Call OpenAI RAG
@@ -109,5 +117,31 @@ export class FactoryService {
     }
 
     return carousel;
+  }
+
+  async generateSlideImage(prompt: string, templateStyle?: string) {
+    if (!prompt) {
+      throw new HttpException('Prompt is required', HttpStatus.BAD_REQUEST);
+    }
+
+    return {
+      imageUrl: await this.openai.generateFactoryImage(prompt, templateStyle),
+    };
+  }
+
+  async getPinterestReferences(prompt: string, templateStyle?: string) {
+    if (!prompt) {
+      throw new HttpException('Prompt is required', HttpStatus.BAD_REQUEST);
+    }
+
+    const queries = await this.openai.generatePinterestQueries(prompt, templateStyle);
+
+    return {
+      queries,
+      results: queries.map((query) => ({
+        query,
+        url: `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(query)}`,
+      })),
+    };
   }
 }

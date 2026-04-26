@@ -7,6 +7,11 @@ export class GenerateCarouselDto {
     templateId: string;
 }
 
+export class GenerateSlideImageDto {
+  prompt: string;
+  templateStyle?: string;
+}
+
 @Controller('api/factory')
 export class FactoryController {
   constructor(private readonly factoryService: FactoryService) {}
@@ -20,5 +25,15 @@ export class FactoryController {
   @Get('carousel/:id')
   async getCarousel(@Param('id') id: string) {
     return await this.factoryService.getCarousel(id);
+  }
+
+  @Post('image')
+  async generateSlideImage(@Body() dto: GenerateSlideImageDto) {
+    return await this.factoryService.generateSlideImage(dto.prompt, dto.templateStyle);
+  }
+
+  @Post('pinterest-references')
+  async getPinterestReferences(@Body() dto: GenerateSlideImageDto) {
+    return await this.factoryService.getPinterestReferences(dto.prompt, dto.templateStyle);
   }
 }

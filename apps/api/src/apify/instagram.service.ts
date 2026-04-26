@@ -28,6 +28,14 @@ export interface InstagramPost {
   };
 }
 
+export interface PublicInstagramCaptionPost {
+  id: string;
+  caption: string;
+  timestamp: string;
+  permalink?: string;
+  username?: string;
+}
+
 @Injectable()
 export class InstagramService {
   private readonly logger = new Logger(InstagramService.name);
@@ -277,5 +285,88 @@ export class InstagramService {
       this.logger.error('Erro ao buscar contas do Instagram', error.response?.data || error.message);
       throw error;
     }
+  }
+
+  async fetchPublicProfileCaptions(
+    username: string,
+    days: number = 3,
+    maxItems: number = 30,
+  ): Promise<PublicInstagramCaptionPost[]> {
+    if (!this.apifyClient) {
+      throw new Error('APIFY_API_TOKEN not configured for public Instagram scraping.');
+    }
+
+    const actorId = this.configService.get<string>('APIFY_INSTAGRAM_ACTOR_ID') || 'apify/instagram-scraper';
+    const minDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    this.logger.log(`Fetching public Instagram captions for @${username} from the last ${days} days...`);
+
+    const input = {
+      directUrls: [`https://www.instagram.com/${username}/`],
+      resultsType: 'posts',
+      resultsLimit: maxItems,
+      searchType: 'user',
+      addParentData: false,
+    };
+
+    const run = await this.apifyClient.actor(actorId).call(input);
+    const { items } = await this.apifyClient.dataset(run.defaultDatasetId).listItems();
+
+    const posts = (items || [])
+      .map((item: any) => {
+        const timestamp =
+          item.timestamp ||
+          item.takenAtTimestamp ||
+          item.latestPosts?.[0]?.timestamp ||
+          item.latestPosts?.[0]?.takenAtTimestamp;
+
+        const caption =
+          item.caption ||
+          item.latestPosts?.[0]?.caption ||
+          item.latestPosts?.[0]?.title ||
+          '';
+
+        const permalink =
+          item.url ||
+          item.inputUrl ||
+          item.latestPosts?.[0]?.url;
+
+        const normalizedTimestamp = this.normalizeTimestamp(timestamp);
+
+        return {
+          id: String(item.id || item.shortCode || permalink || Math.random()),
+          caption: String(caption || '').trim(),
+          timestamp: normalizedTimestamp,
+          permalink: permalink ? String(permalink) : undefined,
+          username,
+        } satisfies PublicInstagramCaptionPost;
+      })
+      .filter((post) => post.caption.length > 0 && post.timestamp.length > 0)
+      .filter((post) => new Date(post.timestamp).getTime() >= minDate.getTime())
+      .sort((a, b) => +new Date(b.timestamp) - +new Date(a.timestamp));
+
+    return posts;
+  }
+
+  private normalizeTimestamp(value: unknown): string {
+    if (typeof value === 'number') {
+      const timestamp = value < 10_000_000_000 ? value * 1000 : value;
+      return new Date(timestamp).toISOString();
+    }
+
+    if (typeof value === 'string') {
+      const asNumber = Number(value);
+
+      if (!Number.isNaN(asNumber)) {
+        return this.normalizeTimestamp(asNumber);
+      }
+
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toISOString();
+      }
+    }
+
+    return '';
   }
 }

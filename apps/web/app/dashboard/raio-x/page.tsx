@@ -88,15 +88,17 @@ const OBJECTIVES_FIELDS = [
   { key: 'content_goals', label: 'Objetivos com Conteúdo', placeholder: 'Ex: Gerar autoridade, vender cursos, atrair clientes...' },
   { key: 'monetization_strategy', label: 'Estratégia de Monetização', placeholder: 'Ex: Vendas diretas, afiliados, consultorias...' },
   { key: 'brand_values', label: 'Valores da Marca', placeholder: 'Ex: Transparência, inovação, proximidade...' },
-  { key: 'competitors', label: 'Concorrentes/Referências', placeholder: 'Ex: @fulano, @ciclano, marca X...' },
+  { key: 'competitors', label: 'Concorrente Direto (apenas 1 @)', placeholder: 'Ex: @concorrente' },
   { key: 'extra_notes', label: 'Observações Extras', placeholder: 'Informações adicionais relevantes...' },
 ];
 
 function ObjectivesForm({ profileId }: { profileId: string }) {
   const [form, setForm] = useState<Record<string, string>>({});
+  const [initialCompetitor, setInitialCompetitor] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [toast, setToast] = useState<{ show: boolean; message: string }>({ show: false, message: '' });
 
   useEffect(() => {
     if (!profileId) return;
@@ -109,22 +111,47 @@ function ObjectivesForm({ profileId }: { profileId: string }) {
             if (data[f.key]) existing[f.key] = data[f.key];
           });
           setForm(existing);
+          if (data.competitors) {
+            setInitialCompetitor(data.competitors.trim());
+          }
         }
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
   }, [profileId]);
 
+  const showToast = (message: string) => {
+    setToast({ show: true, message });
+    setTimeout(() => setToast({ show: false, message: '' }), 5000);
+  };
+
   const handleSave = async () => {
     setSaving(true);
     setSaved(false);
+    
+    // Clean competitors field to make sure it's a single handle
+    let rawCompetitor = (form['competitors'] || '').trim();
+    if (rawCompetitor.includes('instagram.com/')) {
+        const parts = rawCompetitor.split('.com/');
+        rawCompetitor = parts[1]?.replace('/', '').split('?')[0] || rawCompetitor;
+    }
+    rawCompetitor = rawCompetitor.startsWith('@') ? rawCompetitor : (rawCompetitor ? `@${rawCompetitor}` : '');
+    const updatedForm = { ...form, competitors: rawCompetitor };
+    setForm(updatedForm);
+
     try {
       const res = await fetch(`${API_URL}/api/raio-x/objectives`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profileId, objectives: form }),
+        body: JSON.stringify({ profileId, objectives: updatedForm }),
       });
-      if (res.ok) setSaved(true);
+      if (res.ok) {
+        setSaved(true);
+        if (rawCompetitor && rawCompetitor !== initialCompetitor) {
+          showToast(`Analisando perfil de ${rawCompetitor} em segundo plano...`);
+          setInitialCompetitor(rawCompetitor);
+        }
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -135,7 +162,18 @@ function ObjectivesForm({ profileId }: { profileId: string }) {
   if (!loaded) return null;
 
   return (
-    <div className="bg-zinc-900/60 border border-white/5 rounded-3xl p-8 backdrop-blur-2xl animate-in fade-in slide-in-from-bottom-4 duration-700">
+    <div className="relative bg-zinc-900/60 border border-white/5 rounded-3xl p-8 backdrop-blur-2xl animate-in fade-in slide-in-from-bottom-4 duration-700">
+      
+      {/* Toast Notification no canto superior direito */}
+      {toast.show && (
+        <div className="fixed top-4 right-4 z-50 bg-zinc-800 text-white font-medium border border-brand/50 px-6 py-4 rounded-xl shadow-[0_0_15px_rgba(242,47,29,0.3)] flex items-center justify-between gap-4 animate-in fade-in slide-in-from-right-8 duration-500">
+           <div className="flex items-center gap-3">
+             <Loader2 className="w-5 h-5 animate-spin text-brand" />
+             <span>{toast.message}</span>
+           </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 mb-6">
         <div className="w-10 h-10 bg-brand/10 text-brand rounded-xl flex items-center justify-center">
           <Target size={20} />
@@ -167,6 +205,7 @@ function ObjectivesForm({ profileId }: { profileId: string }) {
                 onChange={e => setForm(prev => ({ ...prev, [field.key]: e.target.value }))}
                 placeholder={field.placeholder}
                 className="w-full bg-zinc-800/50 border border-white/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-brand/50 focus:ring-1 focus:ring-brand/30 transition-colors"
+                maxLength={field.key === 'competitors' ? 30 : undefined}
               />
             )}
           </div>

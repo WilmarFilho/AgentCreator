@@ -4,6 +4,9 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "AgentCreator | AI Carousel Generator",
   description: "Gere carrosséis incríveis para o Instagram usando IA.",
+  icons: {
+    icon: "/icon.svg",
+  },
 };
 
 export default function RootLayout({
